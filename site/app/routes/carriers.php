@@ -11,7 +11,7 @@ $sumPU = array_sum(array_map(fn($s) => (int)$s['power_units'], $states));
 $sumDrivers = array_sum(array_map(fn($s) => (int)$s['drivers'], $states));
 
 page_start([
-    'title' => 'Trucking Companies by State | ' . nf($total) . ' FMCSA Motor Carriers | ' . cfg('site_name'),
+    'title' => seo_title('Trucking Companies by State', plural($total, 'FMCSA Motor Carrier')),
     'description' => 'Look up any of ' . nf($total) . ' FMCSA-registered trucking companies by USDOT number, name, state, city or cargo type. Fleet size, drivers, authority, safety rating and phone for every motor carrier in the United States.',
     'canonical' => '/carriers/',
     'jsonld' => [breadcrumbs_ld($crumbs), [
@@ -39,7 +39,7 @@ page_start([
 <div class="grid2">
 <div class="card prose"><h2>About this directory</h2>
 <p>Every motor carrier that registers with the Federal Motor Carrier Safety Administration (FMCSA) receives a USDOT number and files an MCS-150 form describing its fleet, drivers, operation type and the cargo it hauls. This directory publishes those public records for all 50 states so shippers, brokers, insurers and carriers themselves can check a company quickly.</p>
-<p>Carriers can <a href="/get-listed">claim their profile</a> to add a website, logo and verified contact details. Service providers can <a href="/advertise">reach carriers by state and category</a>. Need the complete dataset with email addresses, cell phones and company officer names? See our <a href="/carrier-data/">carrier data packages</a>.</p>
+<p>Carriers can <a href="/get-listed">claim their profile</a> to add a website link and verified contact details. Service providers can <a href="/advertise">reach carriers by state and category</a>. Need the complete dataset with email addresses, cell phones and company officer names? See our <a href="/carrier-data/">carrier data packages</a>.</p>
 </div>
 <div><div class="cta-box"><h3>The whole country as one spreadsheet</h3><p><?= nf($total) ?> carriers with every public field plus emails, cell phones and decision-maker names, filterable by state, fleet size and cargo.</p><a class="btn btn-gold" href="/carrier-data/">See data packages &rarr;</a></div></div>
 </div>

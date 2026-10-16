@@ -1,39 +1,89 @@
 # Trucking Directory USA - carrier engine rewrite rules
 # Upload this file to public_html/ (merge with an existing .htaccess if you have one).
 
+Options -Indexes
 RewriteEngine On
 RewriteBase /
+
+# --- Canonical scheme and host (keep at the top) ------------------------------
+# Force HTTPS (skipped when a proxy such as Cloudflare already terminated TLS).
+RewriteCond %{HTTPS} off
+RewriteCond %{HTTP:X-Forwarded-Proto} !https [NC]
+RewriteRule ^ https://truckingdirectoryusa.com%{REQUEST_URI} [L,R=301]
+# www -> apex
+RewriteCond %{HTTP_HOST} ^www\.truckingdirectoryusa\.com$ [NC]
+RewriteRule ^ https://truckingdirectoryusa.com%{REQUEST_URI} [L,R=301]
 
 # Pass the Authorization header through to PHP (needed for the /admin login)
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
+# --- Guards (before the route rules) -------------------------------------------
+# These test THE_REQUEST, the raw request line the client sent. It never changes, while Apache
+# re-runs this file after every internal rewrite with the rewritten path and query
+# (app/index.php?r=...). Testing %{QUERY_STRING} here would 404 every page on that second pass.
+#
+# The front controller is reached only through the rewrites below, never by URL
+# (also catches //app/ and percent-encoded spellings of "app").
+RewriteCond %{THE_REQUEST} \s/+(?:a|%61)(?:p|%70)(?:p|%70)(?:/|%2f) [NC]
+RewriteRule ^ - [R=404,L]
+# Internal pass: the request was already rewritten to the front controller below. Stop here.
+RewriteRule ^app/index\.php$ - [L]
+# Query strings must not smuggle route parameters past the rewrites (PHP keeps the last value).
+# r= is never legitimate from a client ...
+RewriteCond %{THE_REQUEST} \s[^\s?]*\?(?:[^\s]*&)?r= [NC]
+RewriteRule ^ - [R=404,L]
+# ... and the other route parameters are legitimate only on the search and lead forms (?state=, ?dot=, ?cat=).
+RewriteCond %{REQUEST_URI} !^/(quote/|carriers/search|get-listed|advertise) [NC]
+RewriteCond %{THE_REQUEST} \s[^\s?]*\?(?:[^\s]*&)?(state|city|dot|slug|cargo|cat|part|type)= [NC]
+RewriteRule ^ - [R=404,L]
+
+# --- Canonical URL variants (301, GET/HEAD only) ------------------------------
+# Targets are absolute https URLs so a TLS-terminating proxy never sees an extra http hop.
+# Hub pages always end with a slash: /carriers/georgia -> /carriers/georgia/ (the search page is the exception).
+RewriteCond %{REQUEST_METHOD} ^(GET|HEAD)$
+RewriteCond %{REQUEST_URI} !^/carriers/search$ [NC]
+RewriteRule ^(carriers|carriers/[a-z-]+|carriers/[a-z-]+/cities|carriers/[a-z-]+/cargo/[a-z0-9-]+|carriers/[a-z-]+/[a-z0-9-]+|carrier-data|equipment_dealers|freight_brokers|dispatch_services|insurance_brokers|finance_lenders|equipment_brokers|auto_transport_brokers|third_party_logistics|load_boards|customs_brokers|factoring_companies|fuel_cards|compliance_services|truck_repair_services|trucking_software|shippers)$  https://truckingdirectoryusa.com/$1/ [R=301,L,NC]
+# Profile URLs never end with a slash: /carrier/123/slug/ -> /carrier/123/slug
+RewriteCond %{REQUEST_METHOD} ^(GET|HEAD)$
+RewriteRule ^(carrier/[0-9]+(/[a-z0-9-]*)?)/$                    https://truckingdirectoryusa.com/$1 [R=301,L,NC]
+# Old static vendor URLs: /freight_brokers/index.php, /shippers/index.html, /load_boards.html -> /<category>/
+RewriteCond %{REQUEST_METHOD} ^(GET|HEAD)$
+RewriteRule ^(equipment_dealers|freight_brokers|dispatch_services|insurance_brokers|finance_lenders|equipment_brokers|auto_transport_brokers|third_party_logistics|load_boards|customs_brokers|factoring_companies|fuel_cards|compliance_services|truck_repair_services|trucking_software|shippers)(?:\.html|/index\.(?:html|php))$  https://truckingdirectoryusa.com/$1/ [R=301,L,NC]
+# Upper-case letters in a path are matched here ([NC]) and sent to the lower-case URL by app/index.php.
+
 # --- Carrier engine --------------------------------------------------------
-RewriteRule ^carriers/?$                                          app/index.php?r=carriers [L,QSA]
-RewriteRule ^carriers/search/?$                                   app/index.php?r=search [L,QSA]
-RewriteRule ^carriers/([a-z-]+)/?$                                app/index.php?r=state&state=$1 [L,QSA]
-RewriteRule ^carriers/([a-z-]+)/cities/?$                         app/index.php?r=cities&state=$1 [L,QSA]
-RewriteRule ^carriers/([a-z-]+)/cargo/([a-z0-9-]+)/?$             app/index.php?r=cargo&state=$1&cargo=$2 [L,QSA]
-RewriteRule ^carriers/([a-z-]+)/([a-z0-9-]+)/?$                   app/index.php?r=city&state=$1&city=$2 [L,QSA]
-RewriteRule ^carrier/([0-9]+)(?:/([a-z0-9-]*))?/?$                app/index.php?r=carrier&dot=$1&slug=$2 [L,QSA]
+# QSA (keep the query string) only where the page reads query parameters: search (?q=), paginated
+# lists (?page=), the lead/claim/vendor forms (?state=, ?dot=, ?cat=, ?session_id=) and /admin.
+RewriteRule ^carriers/$                                           app/index.php?r=carriers [L,NC]
+RewriteRule ^carriers/search/?$                                   app/index.php?r=search [L,NC,QSA]
+RewriteRule ^carriers/([a-z-]+)/$                                 app/index.php?r=state&state=$1 [L,NC]
+RewriteRule ^carriers/([a-z-]+)/cities/$                          app/index.php?r=cities&state=$1 [L,NC]
+RewriteRule ^carriers/([a-z-]+)/cargo/([a-z0-9-]+)/$              app/index.php?r=cargo&state=$1&cargo=$2 [L,NC,QSA]
+RewriteRule ^carriers/([a-z-]+)/([a-z0-9-]+)/$                    app/index.php?r=city&state=$1&city=$2 [L,NC,QSA]
+RewriteRule ^carrier/([0-9]+)(?:/([a-z0-9-]*))?$                  app/index.php?r=carrier&dot=$1&slug=$2 [L,NC]
 
 # --- Claims, leads, listings, data -----------------------------------------
-RewriteRule ^claim/thanks/?$                                      app/index.php?r=claim_thanks [L,QSA]
-RewriteRule ^claim/([0-9]+)/?$                                    app/index.php?r=claim&dot=$1 [L,QSA]
-RewriteRule ^quote/([a-z-]+)/?$                                   app/index.php?r=quote&type=$1 [L,QSA]
-RewriteRule ^get-listed/?$                                        app/index.php?r=get_listed [L,QSA]
-RewriteRule ^advertise/?$                                         app/index.php?r=advertise [L,QSA]
-RewriteRule ^carrier-data/?$                                      app/index.php?r=packages [L,QSA]
-RewriteRule ^admin/?$                                             app/index.php?r=admin [L,QSA]
+RewriteRule ^claim/thanks/?$                                      app/index.php?r=claim_thanks [L,NC,QSA]
+RewriteRule ^claim/([0-9]+)/?$                                    app/index.php?r=claim&dot=$1 [L,NC]
+RewriteRule ^quote/([a-z-]+)/?$                                   app/index.php?r=quote&type=$1 [L,NC,QSA]
+RewriteRule ^get-listed/?$                                        app/index.php?r=get_listed [L,NC,QSA]
+RewriteRule ^advertise/?$                                         app/index.php?r=advertise [L,NC,QSA]
+RewriteRule ^carrier-data/$                                       app/index.php?r=packages [L,NC]
+RewriteRule ^opt-out/?$                                           app/index.php?r=opt_out [L,NC]
+RewriteRule ^terms/?$                                             app/index.php?r=terms [L,NC]
+RewriteRule ^privacy/?$                                           app/index.php?r=privacy [L,NC]
+RewriteRule ^admin/?$                                             app/index.php?r=admin [L,NC,QSA]
 RewriteRule ^stripe-webhook/?$                                    app/index.php?r=webhook [L]
 
 # --- Sitemaps ---------------------------------------------------------------
-RewriteRule ^sitemap-carriers\.xml$                               app/index.php?r=sitemap_index [L]
-RewriteRule ^sitemap-carriers-([a-z0-9-]+)\.xml$                  app/index.php?r=sitemap&part=$1 [L]
+RewriteRule ^sitemap-carriers\.xml$                               app/index.php?r=sitemap_index [L,NC]
+RewriteRule ^sitemap-carriers-([a-z0-9-]+)\.xml$                  app/index.php?r=sitemap&part=$1 [L,NC]
 
 # --- Vendor category pages (replaces the old static placeholder pages) ------
 # These rules take precedence over the old static files, so the old folders can be deleted whenever convenient.
-RewriteRule ^(equipment_dealers|freight_brokers|dispatch_services|insurance_brokers|finance_lenders|equipment_brokers|auto_transport_brokers|third_party_logistics|load_boards|customs_brokers|factoring_companies|fuel_cards|compliance_services|truck_repair_services|trucking_software|shippers)/?(index\.html)?$  app/index.php?r=vendor_index&cat=$1 [L,QSA]
-RewriteRule ^(equipment_dealers|freight_brokers|dispatch_services|insurance_brokers|finance_lenders|equipment_brokers|auto_transport_brokers|third_party_logistics|load_boards|customs_brokers|factoring_companies|fuel_cards|compliance_services|truck_repair_services|trucking_software|shippers)/([a-z-]+)\.html$  app/index.php?r=vendor_state&cat=$1&state=$2 [L,QSA]
+# /<cat>, /<cat>.html, /<cat>/index.html and /<cat>/index.php are 301'd to /<cat>/ above.
+RewriteRule ^(equipment_dealers|freight_brokers|dispatch_services|insurance_brokers|finance_lenders|equipment_brokers|auto_transport_brokers|third_party_logistics|load_boards|customs_brokers|factoring_companies|fuel_cards|compliance_services|truck_repair_services|trucking_software|shippers)/$  app/index.php?r=vendor_index&cat=$1 [L,NC]
+RewriteRule ^(equipment_dealers|freight_brokers|dispatch_services|insurance_brokers|finance_lenders|equipment_brokers|auto_transport_brokers|third_party_logistics|load_boards|customs_brokers|factoring_companies|fuel_cards|compliance_services|truck_repair_services|trucking_software|shippers)/([a-z-]+)\.html$  app/index.php?r=vendor_state&cat=$1&state=$2 [L,NC]
 
 # --- Hardening --------------------------------------------------------------
 # Never serve the app internals or databases directly.
@@ -42,12 +92,23 @@ RedirectMatch 404 ^/app/(config|config\.local|categories|sponsors)\.php$
 <FilesMatch "\.(db|db-wal|db-shm|sqlite)$">
   Require all denied
 </FilesMatch>
+# Logs, backups, dumps, scripts, notes and key files are never web content (robots.txt is re-allowed below).
+<FilesMatch "^(error_log|php_errorlog|\.ht.*|.*\.(log|bak|sql|py|md|txt|key))$">
+  Require all denied
+</FilesMatch>
+<Files "robots.txt">
+  Require all granted
+</Files>
 
 # Security headers
 <IfModule mod_headers.c>
   Header set X-Content-Type-Options "nosniff"
   Header set X-Frame-Options "SAMEORIGIN"
   Header set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Strict-Transport-Security "max-age=31536000" env=HTTPS
+  # Applies to the static pages too: if one of them loads a script, font or style from another host,
+  # add that host here (check the browser console after uploading).
+  Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://www.google-analytics.com https://www.googletagmanager.com; frame-ancestors 'self'"
 </IfModule>
 
 # Compression for HTML/XML
