@@ -56,6 +56,46 @@ function fmt_phone(?string $digits): string
     return sprintf('(%s) %s-%s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6));
 }
 
+/** Docket prefix for a carrier row: MC, MX or FF (stored by the trimmer in mc_prefix; NULL/unknown = MC). */
+function docket_prefix(array $c): string
+{
+    $p = strtoupper(trim((string)($c['mc_prefix'] ?? '')));
+    return in_array($p, ['MC', 'MX', 'FF'], true) ? $p : 'MC';
+}
+
+/** "MC-123456" / "MX-123456" / "FF-123456", or '' when the carrier has no docket number. */
+function docket_label(array $c, string $sep = '-'): string
+{
+    if (empty($c['mc_number'])) {
+        return '';
+    }
+    return docket_prefix($c) . $sep . $c['mc_number'];
+}
+
+/** "1 Carrier" / "12 Carriers" (singular/plural with a formatted count). */
+function plural(int $n, string $singular, ?string $plural = null): string
+{
+    return nf($n) . ' ' . ($n === 1 ? $singular : ($plural ?? $singular . 's'));
+}
+
+/**
+ * Page title kept under 60 characters where possible: "$core | $detail$pageSuffix | Site name".
+ * The detail segment (e.g. a count) is dropped first; the site name is dropped only when
+ * $brandOptional (carrier profiles, whose names already carry the identity).
+ */
+function seo_title(string $core, string $detail = '', string $pageSuffix = '', bool $brandOptional = false): string
+{
+    $brand = (string)cfg('site_name');
+    $t = $core . ($detail !== '' ? ' | ' . $detail : '') . $pageSuffix . ' | ' . $brand;
+    if (strlen($t) > 60 && $detail !== '') {
+        $t = $core . $pageSuffix . ' | ' . $brand;
+    }
+    if (strlen($t) > 60 && $brandOptional) {
+        $t = $core . ($detail !== '' ? ' | ' . $detail : '') . $pageSuffix;
+    }
+    return $t;
+}
+
 function fmt_date(?string $iso): string
 {
     if (!$iso) {
@@ -253,17 +293,33 @@ function cdusa_state_url(string $abbr): string
     return str_replace(['{state}', '{state_slug}'], [$abbr, state_slug($abbr)], $c['state_pattern']);
 }
 
+/** Path component of the current request (no query string); '/' when the URI is malformed. */
+function request_path(): string
+{
+    $p = parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+    return is_string($p) && $p !== '' ? $p : '/';
+}
+
 function current_page(): int
 {
     $p = (int)($_GET['page'] ?? 1);
     return $p < 1 ? 1 : min($p, 5000);
 }
 
-/** Returns [offset, pages] */
-function paginate(int $total, int $page, int $per): array
+/**
+ * Returns [offset, pages, page]. When $base is given and ?page points past the last page,
+ * the request is 301-redirected to the last page instead of serving a duplicate empty page.
+ */
+function paginate(int $total, int $page, int $per, ?string $base = null): array
 {
-    $pages = max(1, (int)ceil($total / $per));
-    $page = min($page, $pages);
+    $pages = max(1, (int)ceil($total / max(1, $per)));
+    if ($page > $pages) {
+        if ($base !== null && in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true)) {
+            header('Location: ' . url(page_url($base, $pages)), true, 301);
+            exit;
+        }
+        $page = $pages;
+    }
     return [($page - 1) * $per, $pages, $page];
 }
 
@@ -272,40 +328,210 @@ function page_url(string $base, int $page): string
     return $page <= 1 ? $base : $base . '?page=' . $page;
 }
 
+/**
+ * Client address for rate limiting and dispute evidence. REMOTE_ADDR unless the site is
+ * provably behind Cloudflare (config 'behind_cloudflare' => true), because any client can
+ * send a CF-Connecting-IP header.
+ */
 function client_ip(): string
 {
-    return $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
+    $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+    if (cfg('behind_cloudflare') === true && !empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+        $cf = (string)$_SERVER['HTTP_CF_CONNECTING_IP'];
+        if (filter_var($cf, FILTER_VALIDATE_IP) !== false) {
+            $ip = $cf;
+        }
+    }
+    return substr($ip, 0, 45);
 }
 
-function post(string $k, int $max = 500): string
+/** Browser user agent, truncated, control characters removed (stored next to the IP as evidence). */
+function user_agent(): string
+{
+    $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
+    $ua = preg_replace('/[\x00-\x1F\x7F]/', '', $ua) ?? '';
+    return mb_substr($ua, 0, 200);
+}
+
+function is_https(): bool
+{
+    if (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off') {
+        return true;
+    }
+    return strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+}
+
+/**
+ * Trimmed POST field with control characters removed. $multiline keeps line breaks
+ * (notes, blurb); everything else is forced onto one line.
+ */
+function post(string $k, int $max = 500, bool $multiline = false): string
 {
     $v = $_POST[$k] ?? '';
-    $v = is_string($v) ? trim($v) : '';
-    return mb_substr($v, 0, $max);
+    $v = is_string($v) ? $v : '';
+    if ($multiline) {
+        $v = str_replace(["\r\n", "\r"], "\n", $v);
+        $v = preg_replace('/[\x00-\x09\x0B-\x1F\x7F]/', '', $v) ?? '';
+    } else {
+        $v = preg_replace('/[\x00-\x1F\x7F]/', ' ', $v) ?? '';
+    }
+    return mb_substr(trim($v), 0, $max);
 }
 
 function valid_email(string $e): bool
 {
-    return $e !== '' && filter_var($e, FILTER_VALIDATE_EMAIL) !== false;
+    return $e !== '' && strlen($e) <= 200 && filter_var($e, FILTER_VALIDATE_EMAIL) !== false;
 }
 
-function send_notification(string $subject, string $body): void
+/** Website URL check shared by the claim and vendor forms (after the https:// prefix was added). */
+function valid_website(string $url): bool
+{
+    return strlen($url) <= 200 && preg_match('~^https?://[A-Za-z0-9.-]+(?::\d+)?(?:/[^\s<>"\'`]*)?$~', $url) === 1;
+}
+
+/** A Payment Link is usable only when it is set, points at Stripe and is not the shipped placeholder. */
+function stripe_link_ok(?string $link): bool
+{
+    $link = (string)$link;
+    return $link !== '' && !str_contains($link, 'REPLACE_ME') && str_starts_with($link, 'https://');
+}
+
+/**
+ * Plain-text mail with safe headers. Returns false (and logs) when the address is bad or mail() failed.
+ * From = from_email (a mailbox on this domain so SPF passes), Reply-To = the public support address.
+ */
+function send_mail(string $to, string $subject, string $body): bool
+{
+    $to = trim($to);
+    if (!valid_email($to)) {
+        error_log('TDUSA mail: refused invalid recipient');
+        return false;
+    }
+    $subject = trim(str_replace(["\r", "\n", "\t"], ' ', $subject));
+    $subject = preg_replace('/[\x00-\x1F\x7F]/', '', $subject) ?? '';
+    $subject = mb_substr($subject, 0, 200);
+    $from = trim(str_replace(["\r", "\n"], '', (string)cfg('from_email')));
+    $reply = trim(str_replace(["\r", "\n"], '', (string)(cfg('contact_email') ?: $from)));
+    $name = preg_replace('/[^\w .-]/', '', (string)cfg('site_name')) ?? 'Trucking Directory USA';
+    $headers = 'From: ' . $name . ' <' . $from . ">\r\n"
+        . 'Reply-To: ' . $reply . "\r\n"
+        . "MIME-Version: 1.0\r\n"
+        . "Content-Type: text/plain; charset=UTF-8\r\n"
+        . "Content-Transfer-Encoding: 8bit\r\n";
+    $body = str_replace(["\r\n", "\r"], "\n", $body);
+    $ok = @mail($to, $subject, $body, $headers);
+    if (!$ok) {
+        error_log('TDUSA mail: mail() returned false for subject "' . $subject . '"');
+    }
+    return $ok;
+}
+
+/** Owner notification (private notify_email). */
+function send_notification(string $subject, string $body): bool
 {
     $to = (string)cfg('notify_email');
     if ($to === '') {
-        return;
+        return false;
     }
-    $headers = 'From: ' . cfg('site_name') . ' <' . cfg('from_email') . ">\r\nReply-To: " . cfg('from_email') . "\r\n";
-    @mail($to, '[TDUSA] ' . $subject, $body, $headers);
+    return send_mail($to, '[TDUSA] ' . $subject, $body);
 }
 
-function csrf_token(): string
+/**
+ * Secret for the public form tokens: config 'form_secret', else app/storage/form.key
+ * (created with random bytes on first use). Never derived from the admin password.
+ */
+function form_secret(): string
 {
-    return hash_hmac('sha256', 'form', (string)cfg('admin_pass') . (string)cfg('site_url'));
+    static $secret = null;
+    if ($secret !== null) {
+        return $secret;
+    }
+    $cfg = trim((string)cfg('form_secret'));
+    if ($cfg !== '') {
+        return $secret = $cfg;
+    }
+    $file = dirname((string)cfg('site_db_path')) . '/form.key';
+    $val = is_file($file) ? trim((string)@file_get_contents($file)) : '';
+    if (strlen($val) < 32) {
+        $val = bin2hex(random_bytes(32));
+        $dir = dirname($file);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0750, true);
+        }
+        if (@file_put_contents($file, $val . "\n", LOCK_EX) !== false) {
+            @chmod($file, 0600);
+        } else {
+            error_log('TDUSA: cannot write ' . $file . '; set form_secret in config.local.php');
+        }
+    }
+    return $secret = $val;
 }
 
-/** Generic, low-friction spam check: honeypot must be empty and the token must match. */
+/** Paragraphs for /terms and /privacy: config text (blank-line separated) when set, else the built-in defaults. */
+function config_paragraphs(string $key, array $defaults): array
+{
+    $txt = trim((string)cfg($key, ''));
+    if ($txt === '') {
+        return $defaults;
+    }
+    $txt = str_replace(["\r\n", "\r"], "\n", $txt);
+    $out = [];
+    foreach (preg_split('/\n\s*\n/', $txt) ?: [] as $p) {
+        $p = trim(preg_replace('/\s+/', ' ', $p) ?? '');
+        if ($p !== '') {
+            $out[] = $p;
+        }
+    }
+    return $out ?: $defaults;
+}
+
+/** Hour-bucketed HMAC token for the public forms; $offset = -1 gives the previous hour. */
+function csrf_token(int $offset = 0): string
+{
+    $windowHour = intdiv(time(), 3600) + $offset;
+    return hash_hmac('sha256', 'form|' . $windowHour, form_secret());
+}
+
+/** Generic, low-friction spam check: honeypot must be empty and the token must be from this or the previous hour. */
 function form_ok(): bool
 {
-    return ($_POST['website_url_hp'] ?? '') === '' && hash_equals(csrf_token(), (string)($_POST['_t'] ?? ''));
+    if (($_POST['website_url_hp'] ?? '') !== '') {
+        return false;
+    }
+    $t = (string)($_POST['_t'] ?? '');
+    return hash_equals(csrf_token(), $t) || hash_equals(csrf_token(-1), $t);
+}
+
+/**
+ * Public-form throttle: 5 submissions per IP per hour and 20 per day. On the limit it sends
+ * a plain 429 and stops, so nothing is inserted or mailed.
+ */
+/**
+ * Two stages so a person who mistypes a field (or shares a network with a bot) is not locked out:
+ *  - 'attempt' runs on every POST before validation: generous, stops floods (30/hour, 100/day per IP).
+ *  - 'submit' runs only once a submission passed the token and field checks, right before the
+ *    row is saved and mail is sent: strict (5/hour, 20/day per IP).
+ */
+function form_rate_limit_or_429(string $stage = 'submit'): void
+{
+    $ip = client_ip();
+    if ($stage === 'attempt') {
+        $okHour = rate_ok('form_try_h', $ip, 30, 3600);
+        $okDay = rate_ok('form_try_d', $ip, 100, 86400);
+    } else {
+        $okHour = rate_ok('form_h', $ip, 5, 3600);
+        $okDay = rate_ok('form_d', $ip, 20, 86400);
+    }
+    if ($okHour && $okDay) {
+        return;
+    }
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    http_response_code(429);
+    header('Content-Type: text/plain; charset=UTF-8');
+    header('Cache-Control: no-store');
+    header('Retry-After: ' . ($okHour ? 86400 : 3600));
+    echo "Too many submissions from your network. Please try again later or email " . (string)cfg('contact_email') . ".\n";
+    exit;
 }

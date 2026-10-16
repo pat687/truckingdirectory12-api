@@ -10,7 +10,7 @@ if (!isset($cats[$cat])) {
 $info = $cats[$cat];
 $total = (int)meta('total', '0');
 $vendors = vendors_for($cat, null, 100);
-$states = q('SELECT state, state_name, n FROM stats_state ORDER BY state_name');
+$states = q('SELECT state, state_name, n_active AS n FROM stats_state ORDER BY state_name');
 $crumbs = [['Home', '/'], [$info['name'], null]];
 page_start([
     'title' => $info['name'] . ' for Trucking Companies - All 50 States | ' . cfg('site_name'),
@@ -19,7 +19,7 @@ page_start([
 ]);
 ?>
 <div class="hero"><div class="container"><?= breadcrumbs_html($crumbs) ?>
-<h1><span><?= e($info['name']) ?></span> for trucking companies</h1><p><?= e($info['intro']) ?> Pick your state below<?= $info['quote'] ? ', or <a href="/quote/' . e($info['quote']) . '">request quotes</a> and let providers come to you' : '' ?>.</p></div></div>
+<h1><span><?= e($info['name']) ?></span> for trucking companies</h1><p><?= e($info['intro']) ?> Pick your state below<?= $info['quote'] ? ', or <a href="/quote/' . e($info['quote']) . '" rel="nofollow">request quotes</a> and let providers come to you' : '' ?>.</p></div></div>
 <div class="container section">
 <?php if ($vendors): ?>
 <div class="card"><h2>Nationwide <?= e(strtolower($info['name'])) ?></h2><div class="listings-grid">
