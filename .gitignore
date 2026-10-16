@@ -1,0 +1,14 @@
+# Databases are built locally and uploaded to the server, never committed
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+site/app/data/*
+!site/app/data/.htaccess
+!site/app/data/README.txt
+site/app/storage/*
+!site/app/storage/.htaccess
+# Local overrides hold Stripe secrets and admin credentials
+site/app/config.local.php
+__pycache__/
+*.pyc

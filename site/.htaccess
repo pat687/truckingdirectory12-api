@@ -1,0 +1,56 @@
+# Trucking Directory USA - carrier engine rewrite rules
+# Upload this file to public_html/ (merge with an existing .htaccess if you have one).
+
+RewriteEngine On
+RewriteBase /
+
+# Pass the Authorization header through to PHP (needed for the /admin login)
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# --- Carrier engine --------------------------------------------------------
+RewriteRule ^carriers/?$                                          app/index.php?r=carriers [L,QSA]
+RewriteRule ^carriers/search/?$                                   app/index.php?r=search [L,QSA]
+RewriteRule ^carriers/([a-z-]+)/?$                                app/index.php?r=state&state=$1 [L,QSA]
+RewriteRule ^carriers/([a-z-]+)/cities/?$                         app/index.php?r=cities&state=$1 [L,QSA]
+RewriteRule ^carriers/([a-z-]+)/cargo/([a-z0-9-]+)/?$             app/index.php?r=cargo&state=$1&cargo=$2 [L,QSA]
+RewriteRule ^carriers/([a-z-]+)/([a-z0-9-]+)/?$                   app/index.php?r=city&state=$1&city=$2 [L,QSA]
+RewriteRule ^carrier/([0-9]+)(?:/([a-z0-9-]*))?/?$                app/index.php?r=carrier&dot=$1&slug=$2 [L,QSA]
+
+# --- Claims, leads, listings, data -----------------------------------------
+RewriteRule ^claim/thanks/?$                                      app/index.php?r=claim_thanks [L,QSA]
+RewriteRule ^claim/([0-9]+)/?$                                    app/index.php?r=claim&dot=$1 [L,QSA]
+RewriteRule ^quote/([a-z-]+)/?$                                   app/index.php?r=quote&type=$1 [L,QSA]
+RewriteRule ^get-listed/?$                                        app/index.php?r=get_listed [L,QSA]
+RewriteRule ^advertise/?$                                         app/index.php?r=advertise [L,QSA]
+RewriteRule ^carrier-data/?$                                      app/index.php?r=packages [L,QSA]
+RewriteRule ^admin/?$                                             app/index.php?r=admin [L,QSA]
+RewriteRule ^stripe-webhook/?$                                    app/index.php?r=webhook [L]
+
+# --- Sitemaps ---------------------------------------------------------------
+RewriteRule ^sitemap-carriers\.xml$                               app/index.php?r=sitemap_index [L]
+RewriteRule ^sitemap-carriers-([a-z0-9-]+)\.xml$                  app/index.php?r=sitemap&part=$1 [L]
+
+# --- Vendor category pages (replaces the old static placeholder pages) ------
+# These rules take precedence over the old static files, so the old folders can be deleted whenever convenient.
+RewriteRule ^(equipment_dealers|freight_brokers|dispatch_services|insurance_brokers|finance_lenders|equipment_brokers|auto_transport_brokers|third_party_logistics|load_boards|customs_brokers|factoring_companies|fuel_cards|compliance_services|truck_repair_services|trucking_software|shippers)/?(index\.html)?$  app/index.php?r=vendor_index&cat=$1 [L,QSA]
+RewriteRule ^(equipment_dealers|freight_brokers|dispatch_services|insurance_brokers|finance_lenders|equipment_brokers|auto_transport_brokers|third_party_logistics|load_boards|customs_brokers|factoring_companies|fuel_cards|compliance_services|truck_repair_services|trucking_software|shippers)/([a-z-]+)\.html$  app/index.php?r=vendor_state&cat=$1&state=$2 [L,QSA]
+
+# --- Hardening --------------------------------------------------------------
+# Never serve the app internals or databases directly.
+RedirectMatch 404 ^/app/(lib|routes|data|storage)(/|$)
+RedirectMatch 404 ^/app/(config|config\.local|categories|sponsors)\.php$
+<FilesMatch "\.(db|db-wal|db-shm|sqlite)$">
+  Require all denied
+</FilesMatch>
+
+# Security headers
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Compression for HTML/XML
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml application/xml text/css application/javascript
+</IfModule>
