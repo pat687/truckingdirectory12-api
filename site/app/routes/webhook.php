@@ -192,6 +192,22 @@ function wh_checkout(PDO $db, array $s): void
         echo 'amount mismatch';
         return;
     }
+    if (($s['mode'] ?? 'payment') === 'subscription') {
+        // A recurring Payment Link: Stripe would bill the buyer again every year while the listing lapses after one
+        // (renewal is a new order, see /terms), and the session carries no payment_intent for refund/dispute matching.
+        $sub = is_string($s['subscription'] ?? null) ? (string)$s['subscription'] : (string)($s['subscription']['id'] ?? '');
+        $db->prepare("UPDATE $table SET status = 'review', stripe_session = ?, amount_cents = ?, payment_intent = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'")
+            ->execute([$session, $amount, $pi, $id]);
+        send_notification(ucfirst($target['kind']) . " #$id paid through a SUBSCRIPTION link (" . wh_money($amount) . ')',
+            "Stripe session $session was paid through a recurring Payment Link" . ($sub !== '' ? " (subscription $sub)" : '') . ".\nPayer: $email\nPlan: {$row['plan']}\n\n"
+            . "Stripe will charge this buyer again next year, but listings run one year and renew only by a new order (see /terms).\n"
+            . "1. In Stripe, cancel that subscription at the end of the current period so it does not renew.\n"
+            . '2. Activate the row in ' . url('/admin') . " (it is in 'review' and NOT live yet).\n"
+            . "3. Replace the '{$row['plan']}' Payment Link with one that uses a ONE-TIME price, and put the new link in config.local.php.\n"
+            . "Refunds and disputes on this payment are not matched automatically: set the row by hand in /admin if one happens.");
+        echo 'subscription payment';
+        return;
+    }
     $st = $db->prepare("UPDATE $table SET status = 'paid', stripe_session = ?, amount_cents = ?, payment_intent = ?, paid_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'pending'");
     $st->execute([$session, $amount, $pi, $id]);
     if ($st->rowCount() !== 1) {

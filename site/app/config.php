@@ -52,13 +52,15 @@ return [
 
     // Stripe Payment Links (create/edit in the Stripe dashboard). Create NEW links for this
     // flow and deactivate the old bare $49 link, so nobody can pay without an intake form.
+    // Each link must use a ONE-TIME price, not a recurring one: a listing runs one year and is
+    // renewed by a new order. A payment through a subscription link is parked in 'review'.
     // In each link's settings set "After payment" -> redirect to:
     //   https://truckingdirectoryusa.com/claim/thanks?session_id={CHECKOUT_SESSION_ID}
     'stripe' => [
-        'claim_verified'  => 'https://buy.stripe.com/REPLACE_ME',  // Verified carrier listing  ($49/yr suggested)
-        'claim_featured'  => 'https://buy.stripe.com/REPLACE_ME',  // Featured carrier listing  ($149/yr suggested)
-        'vendor_listed'   => 'https://buy.stripe.com/cNibIUaVF2FlbAy8go3Ru04', // existing "Get Listed" $49 link
-        'vendor_featured' => 'https://buy.stripe.com/REPLACE_ME',  // existing "Advertise" $149 link
+        'claim_verified'  => 'https://buy.stripe.com/REPLACE_ME',  // Verified carrier listing  ($49 one-time, runs one year)
+        'claim_featured'  => 'https://buy.stripe.com/REPLACE_ME',  // Featured carrier listing  ($149 one-time, runs one year)
+        'vendor_listed'   => 'https://buy.stripe.com/REPLACE_ME',  // Vendor listing            ($49 one-time, runs one year)
+        'vendor_featured' => 'https://buy.stripe.com/REPLACE_ME',  // Vendor featured sponsor   ($149 one-time, runs one year)
         // Webhook signing secret (Developers -> Webhooks -> Add endpoint https://truckingdirectoryusa.com/stripe-webhook)
         // Subscribe to: checkout.session.completed, checkout.session.async_payment_succeeded,
         // checkout.session.async_payment_failed, charge.refunded, charge.dispute.created

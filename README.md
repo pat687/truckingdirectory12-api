@@ -121,7 +121,7 @@ both entries when you override that one.
 | `form_secret` | Leave `''` to auto-create `app/storage/form.key`; or paste the output of `php -r 'echo bin2hex(random_bytes(32));'`. Never reuse the admin password. |
 | `admin_user` / `admin_pass_hash` | Preferred login: `admin_pass_hash` = output of `php -r 'echo password_hash("your long password", PASSWORD_DEFAULT);'`. A plain `admin_pass` still works when the hash is `''`, but use the hash. /admin stays locked (401, message is generic, reason in the PHP error log) while the default password is in place. After 10 failed logins from one IP in 15 minutes /admin answers 429 for 15 minutes. |
 | `behind_cloudflare` | `false` unless every request provably arrives through Cloudflare; only then is the `CF-Connecting-IP` header trusted for rate limiting and the stored IP evidence. |
-| `stripe.claim_verified` … `stripe.vendor_featured` | **Create four NEW Payment Links for this flow** (carrier Verified $49/yr, carrier Featured $149/yr, vendor Listed $49/yr, vendor Featured $149/yr) and **deactivate the old bare $49 link in Stripe**, so nobody can pay without an intake form. A plan whose link is `''` or still `REPLACE_ME` refuses orders with "Online payment for this plan is not available yet" and emails `notify_email`. In each link set After payment → "Don't show confirmation page" → redirect to `https://truckingdirectoryusa.com/claim/thanks?session_id={CHECKOUT_SESSION_ID}`. |
+| `stripe.claim_verified` … `stripe.vendor_featured` | **Create four NEW Payment Links for this flow** (carrier Verified $49, carrier Featured $149, vendor Listed $49, vendor Featured $149) and **deactivate the old bare $49 link in Stripe**, so nobody can pay without an intake form. Give each link a **one-time** price, not a recurring (yearly) one: a listing runs one year from activation and is renewed by a new order (see /terms). A recurring link would bill the buyer again after the listing lapsed, and its sessions carry no payment intent, so refunds and disputes could not be matched; the webhook parks such a payment in `review` and emails you what to do. A plan whose link is `''` or still `REPLACE_ME` refuses orders with "Online payment for this plan is not available yet" and emails `notify_email`. In each link set After payment → "Don't show confirmation page" → redirect to `https://truckingdirectoryusa.com/claim/thanks?session_id={CHECKOUT_SESSION_ID}`. |
 | `stripe.webhook_secret` | Stripe → Developers → Webhooks → Add endpoint `https://truckingdirectoryusa.com/stripe-webhook`. Subscribe to **checkout.session.completed, checkout.session.async_payment_succeeded, checkout.session.async_payment_failed, charge.refunded, charge.dispute.created**. Paste the signing secret. This is what flips a claim to **paid** automatically; without it, mark payments paid by hand in /admin. |
 | `stripe.secret_key` | A **restricted** API key with read access to Checkout Sessions. /claim/thanks uses it to confirm `payment_status = paid` before saying "Payment received". Leave `''` and the page stays neutral ("if your payment completed you will receive a confirmation email"). |
 | `prices.*` | Whole-dollar price per plan; the webhook compares Stripe's `amount_total` against these and parks mismatches in status `review`. Keep them equal to the Payment Link prices. |
@@ -220,7 +220,7 @@ Statuses on claims and vendor listings:
 | --- | --- |
 | `pending` | Form submitted, not paid. |
 | `paid` | Stripe confirmed the payment (webhook). **Awaiting your review.** Not public. |
-| `review` | Stripe paid a different amount than the plan costs (e.g. the $49 link used for a $149 plan). Check in Stripe before activating. Not public. |
+| `review` | Stripe paid a different amount than the plan costs (e.g. the $49 link used for a $149 plan), or the payment came through a recurring (subscription) Payment Link. Check in Stripe before activating; for a subscription, cancel it at period end first. Not public. |
 | `active` | Live on the site. **Only `active` rows show publicly** (Verified badge, website link, vendor cards, sponsor slots, featured pinning). |
 | `rejected` | Declined by you, or the charge was refunded (set automatically on `charge.refunded`). Not public. |
 | `disputed` | A chargeback was opened (set automatically on `charge.dispute.created`). Not public. |
@@ -281,8 +281,8 @@ The public promise is "within 10 business days and before the next data refresh"
 Behaviour an operator must know after this update:
 
 * **Only `active` rows show publicly.** A paid claim or vendor listing is invisible until you set it to
-  `active` in /admin. New statuses `review` (amount mismatch) and `disputed` (chargeback) exist; both are
-  private.
+  `active` in /admin. New statuses `review` (amount mismatch, or a payment through a recurring link) and
+  `disputed` (chargeback) exist; both are private.
 * **Listings expire after one year.** Setting a row to `active` stamps `activated_at`; every public query
   ignores rows activated more than 365 days ago (falling back to `paid_at`, then `created_at`). A renewal is
   a new order, which creates a new row with its own activation date. /terms says the same.
@@ -292,7 +292,9 @@ Behaviour an operator must know after this update:
   and switch to `admin_pass_hash` before launch.
 * **Stripe**: subscribe the webhook to `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
   `checkout.session.async_payment_failed`, `charge.refunded` and `charge.dispute.created`; create new Payment
-  Links per plan and deactivate the old bare $49 link. A plan whose link is still `REPLACE_ME` refuses orders.
+  Links per plan with **one-time** prices and deactivate the old bare $49 link. A plan whose link is still
+  `REPLACE_ME` refuses orders (`vendor_listed` no longer defaults to the old link). A payment through a recurring
+  (subscription) link is parked in `review` with an email saying how to cancel the renewal.
   Buyers now receive a confirmation email; /claim/thanks says "Payment received" only after verifying the
   session with `stripe.secret_key`.
 * **Suppression list**: `tools/suppress.txt` is applied at every rebuild; /opt-out requests arrive as
