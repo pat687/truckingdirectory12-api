@@ -381,8 +381,8 @@ function claim_box(array $c, ?array $claim): string
     }
     $prices = cfg('prices');
     return '<div class="cta-box"><h3>Is this your company?</h3>'
-        . '<p>Claim this page to get a Verified badge, add your website link and an email button, and remove competitor offers from your profile ($' . (int)$prices['claim_verified'] . '/year). '
-        . 'Featured ($' . (int)$prices['claim_featured'] . '/year) adds top placement on your city and cargo pages.</p>'
+        . '<p>Claim this page to get a Verified badge, add your website link and an email button, and remove competitor offers from your profile ($' . (int)$prices['claim_verified'] . ' for one year). '
+        . 'Featured ($' . (int)$prices['claim_featured'] . ' for one year) adds top placement on your city and cargo pages.</p>'
         . '<a class="btn" href="/claim/' . (int)$c['dot'] . '" rel="nofollow">Claim this listing &rarr;</a></div>';
 }
 

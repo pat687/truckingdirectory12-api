@@ -85,7 +85,7 @@ function wh_plan_label(string $table, string $plan): string
 }
 
 /** Log a payment we cannot match, once per Stripe session (the session id is kept in leads.source_url). Returns true when newly logged. */
-function wh_unmatched(PDO $db, string $session, string $ref, int $amount, string $email, string $why): bool
+function wh_unmatched(PDO $db, string $session, string $ref, int $amount, string $email, string $why, string $extra = ''): bool
 {
     $st = $db->prepare("SELECT id FROM leads WHERE type = 'stripe-unmatched' AND source_url = ?");
     $st->execute([$session]);
@@ -95,7 +95,7 @@ function wh_unmatched(PDO $db, string $session, string $ref, int $amount, string
     $db->prepare("INSERT INTO leads (type, email, notes, source_url, status, ip, created_at) VALUES ('stripe-unmatched', ?, ?, ?, 'new', '', datetime('now'))")
         ->execute([$email, 'Stripe session ' . $session . ' amount ' . wh_money($amount) . ($ref !== '' ? " reference '$ref'" : '') . ' - ' . $why, $session]);
     send_notification('Unmatched Stripe payment ' . wh_money($amount),
-        "Session $session from $email for " . wh_money($amount) . ($ref !== '' ? " carried reference '$ref'" : ' had no client_reference_id') . " ($why).\nMatch it manually in " . url('/admin') . " or refund it in Stripe.");
+        "Session $session from $email for " . wh_money($amount) . ($ref !== '' ? " carried reference '$ref'" : ' had no client_reference_id') . " ($why).\nMatch it manually in " . url('/admin') . " or refund it in Stripe." . $extra);
     return true;
 }
 
@@ -149,6 +149,12 @@ function wh_checkout(PDO $db, array $s): void
     $currency = strtolower((string)($s['currency'] ?? 'usd'));
     $email = (string)($s['customer_details']['email'] ?? ($s['customer_email'] ?? ''));
     $pi = is_string($s['payment_intent'] ?? null) ? (string)$s['payment_intent'] : (string)($s['payment_intent']['id'] ?? '');
+    // A recurring (subscription) Payment Link keeps billing the buyer while the listing still lapses one year after
+    // activation (renewal is a new order, see /terms), and its session carries no payment_intent for refund matching.
+    $isSub = ($s['mode'] ?? 'payment') === 'subscription';
+    $sub = is_string($s['subscription'] ?? null) ? (string)$s['subscription'] : (string)($s['subscription']['id'] ?? '');
+    $subNote = $isSub ? "\n\nThis was paid through a RECURRING Payment Link" . ($sub !== '' ? " (subscription $sub)" : '')
+        . '. In Stripe, cancel that subscription at the end of the current period so it does not renew. Refunds and disputes on it are not matched automatically: set the row by hand in /admin.' : '';
     if (($s['payment_status'] ?? '') !== 'paid') {
         echo 'not paid yet';
         return;
@@ -161,7 +167,7 @@ function wh_checkout(PDO $db, array $s): void
     $target = wh_parse_ref($ref);
     if ($target === null) {
         // Payment without a usable reference (e.g. someone used a bare Stripe link). Log it once for manual matching.
-        echo wh_unmatched($db, $session, $ref, $amount, $email, 'no client_reference_id') ? 'logged' : 'already processed';
+        echo wh_unmatched($db, $session, $ref, $amount, $email, 'no client_reference_id', $subNote) ? 'logged' : 'already processed';
         return;
     }
     $table = $target['table'];
@@ -169,8 +175,9 @@ function wh_checkout(PDO $db, array $s): void
     $st = $db->prepare("SELECT * FROM $table WHERE id = ?");
     $st->execute([$id]);
     $row = $st->fetch();
+    $st->closeCursor(); // release the read snapshot before any UPDATE below
     if (!$row) {
-        wh_unmatched($db, $session, $ref, $amount, $email, 'reference does not exist');
+        wh_unmatched($db, $session, $ref, $amount, $email, 'reference does not exist', $subNote);
         echo 'no pending row';
         return;
     }
@@ -179,32 +186,45 @@ function wh_checkout(PDO $db, array $s): void
         return;
     }
     if ($row['status'] !== 'pending') {
+        // A second payment for the same order, or a payment arriving after the owner already set the row by hand.
         error_log("TDUSA webhook: $ref is '{$row['status']}', not pending; session $session (" . wh_money($amount) . ') not applied');
+        $prior = (string)($row['stripe_session'] ?? '');
+        send_notification(ucfirst($target['kind']) . " #$id payment for an order that is already '{$row['status']}' (" . wh_money($amount) . ')',
+            "Stripe session $session paid " . wh_money($amount) . " for $ref, but that order is already '{$row['status']}'.\nPayer: $email\nNothing was changed. "
+            . ($prior !== '' ? "It was already paid through session $prior, so this is a second payment: refund one of them in Stripe." : 'Its status was set by hand in /admin, so this may be the same payment arriving late: check Stripe, and refund it if the buyer paid twice.')
+            . $subNote);
         echo 'no pending row';
         return;
     }
     $expected = (int)(cfg('prices')[wh_price_key($table, (string)$row['plan'])] ?? 0) * 100;
     if ($expected <= 0 || $amount !== $expected || $currency !== 'usd') {
-        $db->prepare("UPDATE $table SET status = 'review', stripe_session = ?, amount_cents = ?, payment_intent = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'")
-            ->execute([$session, $amount, $pi, $id]);
+        $st = $db->prepare("UPDATE $table SET status = 'review', stripe_session = ?, amount_cents = ?, payment_intent = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'");
+        $st->execute([$session, $amount, $pi, $id]);
+        if ($st->rowCount() !== 1) {
+            echo 'no pending row';
+            return;
+        }
         send_notification(ucfirst($target['kind']) . " #$id AMOUNT MISMATCH (" . wh_money($amount) . ' paid, ' . wh_money($expected) . ' expected)',
-            "Stripe session $session paid " . wh_money($amount) . ' ' . strtoupper($currency) . " but the '{$row['plan']}' plan costs " . wh_money($expected) . ".\nPayer: $email\nThe row was set to 'review' and is NOT live. Check it in " . url('/admin') . ' before activating, or refund in Stripe.');
+            "Stripe session $session paid " . wh_money($amount) . ' ' . strtoupper($currency) . " but the '{$row['plan']}' plan costs " . wh_money($expected) . ".\nPayer: $email\nThe row was set to 'review' and is NOT live. Check it in " . url('/admin') . ' before activating, or refund in Stripe.' . $subNote);
         echo 'amount mismatch';
         return;
     }
-    if (($s['mode'] ?? 'payment') === 'subscription') {
-        // A recurring Payment Link: Stripe would bill the buyer again every year while the listing lapses after one
-        // (renewal is a new order, see /terms), and the session carries no payment_intent for refund/dispute matching.
-        $sub = is_string($s['subscription'] ?? null) ? (string)$s['subscription'] : (string)($s['subscription']['id'] ?? '');
-        $db->prepare("UPDATE $table SET status = 'review', stripe_session = ?, amount_cents = ?, payment_intent = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'")
-            ->execute([$session, $amount, $pi, $id]);
+    if ($isSub) {
+        // Correct price, wrong kind of link: hold it for the owner, who cancels the renewal before activating.
+        $st = $db->prepare("UPDATE $table SET status = 'review', stripe_session = ?, amount_cents = ?, payment_intent = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'");
+        $st->execute([$session, $amount, $pi, $id]);
+        if ($st->rowCount() !== 1) {
+            echo 'no pending row';
+            return;
+        }
         send_notification(ucfirst($target['kind']) . " #$id paid through a SUBSCRIPTION link (" . wh_money($amount) . ')',
             "Stripe session $session was paid through a recurring Payment Link" . ($sub !== '' ? " (subscription $sub)" : '') . ".\nPayer: $email\nPlan: {$row['plan']}\n\n"
-            . "Stripe will charge this buyer again next year, but listings run one year and renew only by a new order (see /terms).\n"
+            . "Stripe will charge this buyer again at the next billing date, but a listing runs one year from activation and renews only by a new order (see /terms).\n"
             . "1. In Stripe, cancel that subscription at the end of the current period so it does not renew.\n"
-            . '2. Activate the row in ' . url('/admin') . " (it is in 'review' and NOT live yet).\n"
-            . "3. Replace the '{$row['plan']}' Payment Link with one that uses a ONE-TIME price, and put the new link in config.local.php.\n"
-            . "Refunds and disputes on this payment are not matched automatically: set the row by hand in /admin if one happens.");
+            . '2. Activate the row in ' . url('/admin') . " (it is in 'review' and NOT live yet). The buyer has received the usual order receipt.\n"
+            . '3. Replace the Payment Link in stripe.' . wh_price_key($table, (string)$row['plan']) . " (config.local.php) with one that uses a ONE-TIME price.\n"
+            . 'Refunds and disputes on this payment are not matched automatically: set the row by hand in /admin if one happens.');
+        wh_buyer_confirmation($table, $row, $id, $amount, valid_email($email) ? $email : (string)$row['email']);
         echo 'subscription payment';
         return;
     }

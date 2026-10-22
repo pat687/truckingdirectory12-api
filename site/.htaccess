@@ -23,8 +23,8 @@ RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 # (app/index.php?r=...). Testing %{QUERY_STRING} here would 404 every page on that second pass.
 #
 # The front controller is reached only through the rewrites below, never by URL
-# (also catches //app/ and percent-encoded spellings of "app").
-RewriteCond %{THE_REQUEST} \s/+(?:a|%61)(?:p|%70)(?:p|%70)(?:/|%2f) [NC]
+# (also catches /app without a slash, //app/ and percent-encoded spellings of "app").
+RewriteCond %{THE_REQUEST} \s/+(?:a|%61)(?:p|%70)(?:p|%70)(?:/|%2f|\?|\s) [NC]
 RewriteRule ^ - [R=404,L]
 # Internal pass: the request was already rewritten to the front controller below. Stop here.
 RewriteRule ^app/index\.php$ - [L]
@@ -92,12 +92,21 @@ RedirectMatch 404 ^/app/(config|config\.local|categories|sponsors)\.php$
 <FilesMatch "\.(db|db-wal|db-shm|sqlite)$">
   Require all denied
 </FilesMatch>
-# Logs, backups, dumps, scripts, notes and key files are never web content (robots.txt is re-allowed below).
+# Logs, backups, dumps, scripts, notes and key files are never web content (robots.txt, ads.txt and a few
+# other well-known .txt files are re-allowed below).
 <FilesMatch "^(error_log|php_errorlog|\.ht.*|.*\.(log|bak|sql|py|md|txt|key))$">
   Require all denied
 </FilesMatch>
 <Files "robots.txt">
   Require all granted
+</Files>
+# Public .txt files that ad networks, AI crawlers and security researchers look for.
+<FilesMatch "^(ads|app-ads|llms|security|humans)\.txt$">
+  Require all granted
+</FilesMatch>
+# The upload package, in case it is left in public_html after extracting (it holds config.local.php).
+<Files "public_html-upload.zip">
+  Require all denied
 </Files>
 
 # Security headers

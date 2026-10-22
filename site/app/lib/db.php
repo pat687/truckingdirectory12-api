@@ -33,7 +33,7 @@ function db(): PDO
     return $pdo;
 }
 
-/** carriers.db metadata. Returns $default (instead of failing) when carriers.db is missing, so footers and forms still render. */
+/** carriers.db metadata. Returns $default (instead of failing) when carriers.db is missing or unreadable, so footers and forms still render. */
 function meta(string $key, ?string $default = null): ?string
 {
     static $meta = null;
@@ -44,6 +44,11 @@ function meta(string $key, ?string $default = null): ?string
                 $meta[$r['key']] = $r['value'];
             }
         } catch (CarriersDbMissing $e) {
+            $meta = [];
+        } catch (PDOException $e) {
+            // Damaged or half-uploaded carriers.db: carrier pages fail on their own queries, but footers,
+            // /admin, the forms and the legal pages keep working.
+            error_log('TDUSA: carriers.db unreadable (' . $e->getMessage() . '); upload it as carriers.new.db and rename when complete');
             $meta = [];
         }
     }

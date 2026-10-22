@@ -36,7 +36,7 @@ return [
 
     // Legal identity shown in the footer, on /terms and /privacy and in buyer receipts.
     'operator_name'    => 'Barrgo LLC',
-    'operator_address' => '[Barrgo LLC, street address, Marietta, GA]',
+    'operator_address' => '[street address, Marietta, GA ZIP]',   // street only: operator_name is printed in front of it
     'refund_policy'    => 'Because listings are activated after payment, we do not refund completed orders, but if we cannot activate your listing as described within 3 business days, email us within 7 days and we will fix it or refund you. [confirm]',
     // Optional: replace the built-in /terms and /privacy prose. Plain text, paragraphs separated by a blank line.
     'terms_text'       => '',
