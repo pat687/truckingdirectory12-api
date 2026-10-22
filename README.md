@@ -67,7 +67,7 @@ What is NOT copied: EMAIL_ADDRESS, CELL_PHONE, COMPANY_OFFICER_1/2, FAX, DUNS â€
 yes/no flags, so the pages can say "email and officer name on file" and send people to
 CarrierDataUSA. The web server never holds the data you sell.
 
-**carriers.db schema (version 2).** The engine needs a database built by the current script:
+**carriers.db schema (version 3).** The engine needs a database built by the current script:
 `carriers.mc_prefix`, `stats_city.n_active`, `stats_cargo.n_active` and `stats_state.n_active`
 are read on every page. An older carriers.db (schema version 1 or 2) must be rebuilt before uploading
 the new `site/app/`. Other build details: `idx_carriers_slug` is no longer created, the build
