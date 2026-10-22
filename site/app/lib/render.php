@@ -87,6 +87,7 @@ a{color:inherit;text-decoration:none;}
 .sponsor .slot b{display:block;color:#fff;margin-bottom:4px;}
 .sponsor .slot p{color:#999;margin-bottom:10px;}
 .sponsor .slot.paid{border-style:solid;border-color:rgba(240,165,0,0.5);}
+.listing-card.paid{border-color:rgba(240,165,0,0.5);}
 .sponsor .tag{font-size:0.68rem;color:#888;text-transform:uppercase;letter-spacing:.05em;}
 .prose p{margin-bottom:12px;color:#ccc;}
 .prose h2{color:#fff;font-size:1.15rem;margin:18px 0 8px;}
@@ -144,11 +145,11 @@ function nav_html(): string
     foreach ($cats as $k => $c) {
         $mobile .= '<a href="/' . $k . '/">' . e($c['name']) . '</a>';
     }
-    $mobile .= '<a href="/carriers/search">Search</a><a href="/blog/">Blog</a><a href="/get-listed">Get Listed</a>';
+    $mobile .= '<a href="/carriers/search" rel="nofollow">Search</a><a href="/blog/">Blog</a><a href="/get-listed">Get Listed</a>';
     return '<nav class="nav"><a class="nav-logo" href="/">Trucking<span>Directory</span>USA</a>'
         . '<div class="nav-links"><a href="/carriers/"><b>Carriers</b></a>' . $links
         . '<div class="dropdown"><button type="button">More &#9662;</button><div class="dropdown-menu">' . $more . '</div></div>'
-        . '<a href="/carrier-data/">Carrier Data</a><a href="/carriers/search">&#128269; Search</a><a href="/blog/">Blog</a>'
+        . '<a href="/carrier-data/">Carrier Data</a><a href="/carriers/search" rel="nofollow">&#128269; Search</a><a href="/blog/">Blog</a>'
         . '<a class="btn-listed" href="/get-listed">Get Listed</a></div>'
         . '<button class="hamburger" aria-label="Menu" onclick="document.getElementById(\'mm\').classList.toggle(\'open\')"><span></span><span></span><span></span></button></nav>'
         . '<div class="mobile-menu" id="mm">' . $mobile . '</div>';
@@ -168,14 +169,19 @@ function footer_html(): string
     }
     $total = meta('total');
     $snap = meta('snapshot_date');
+    $operator = (string)cfg('operator_name', 'Barrgo LLC');
+    $address = (string)cfg('operator_address', '');
+    $support = (string)cfg('contact_email', '');
     return '<footer class="site-footer"><div class="footer-inner">'
         . '<div class="footer-col"><h4>Trucking Directory USA</h4><p>Every FMCSA-registered motor carrier in the United States, plus the brokers, dealers and service providers that keep them moving. Carrier records are public FMCSA data' . ($snap ? ' (snapshot ' . e(fmt_date($snap)) . ')' : '') . '.</p>'
         . '<p><a href="/carrier-data/">Need the full list with emails and officer names? Get carrier data &rarr;</a></p></div>'
         . '<div class="footer-col"><h4>All Categories</h4>' . $c1 . '</div>'
         . '<div class="footer-col"><h4>Carriers by State</h4><a href="/carriers/">All 50 states</a>' . $c2 . '</div>'
-        . '<div class="footer-col"><h4>Company</h4><a href="/about.html">About Us</a><a href="/contact.html">Contact</a><a href="/blog/">Blog</a><a href="/get-listed">Get Listed</a><a href="/advertise">Advertise</a><a href="/privacy.html">Privacy Policy</a><a href="/terms.html">Terms of Service</a><a href="/carriers/search">Search Directory</a></div>'
+        . '<div class="footer-col"><h4>Company</h4><a href="/about.html">About Us</a><a href="/contact.html">Contact</a><a href="/blog/">Blog</a><a href="/get-listed">Get Listed</a><a href="/advertise">Advertise</a><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a><a href="/opt-out" rel="nofollow">Carriers: remove or correct your details</a><a href="/carriers/search" rel="nofollow">Search Directory</a>'
+        . '<p style="margin-top:10px">Operated by ' . e($operator) . ($address !== '' ? '<br>' . e($address) : '') . ($support !== '' ? '<br>Support: <a href="mailto:' . e($support) . '" style="display:inline;margin:0">' . e($support) . '</a>' : '') . '</p></div>'
         . '</div><div class="footer-bottom"><span>&copy; ' . date('Y') . ' Trucking Directory USA. All rights reserved.</span>'
-        . '<span>Serving all 50 states' . ($total ? ' &middot; ' . nf($total) . ' carrier records' : '') . '</span></div></footer>';
+        . '<span>Serving all 50 states' . ($total ? ' &middot; ' . nf($total) . ' carrier records' : '') . '</span></div>'
+        . '<p class="small" style="max-width:1200px;margin:12px auto 0">Data sourced from public FMCSA registration records. Trucking Directory USA is operated by ' . e($operator) . ' and is not affiliated with the Federal Motor Carrier Safety Administration or the US Department of Transportation.</p></footer>';
 }
 
 /**
@@ -187,7 +193,7 @@ function page_start(array $o): void
     if (!headers_sent()) {
         header('Content-Type: text/html; charset=UTF-8');
         $cache = (int)cfg('cache_seconds', 0);
-        if (($o['cache'] ?? true) && $cache > 0 && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        if (($o['cache'] ?? true) && $cache > 0 && in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true)) {
             header('Cache-Control: public, max-age=' . $cache);
         } else {
             header('Cache-Control: no-store');
@@ -211,7 +217,8 @@ function page_start(array $o): void
     echo '<meta property="og:site_name" content="' . e((string)cfg('site_name')) . "\">\n";
     echo '<link rel="icon" href="/favicon.svg" type="image/svg+xml">' . "\n";
     foreach ($o['jsonld'] ?? [] as $ld) {
-        echo '<script type="application/ld+json">' . json_encode($ld, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "</script>\n";
+        // HEX flags keep '<', '>', '&' and quotes escaped so no data value can close the script element.
+        echo '<script type="application/ld+json">' . json_encode($ld, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . "</script>\n";
     }
     echo '<style>' . site_css() . "</style>\n";
     $ga = (string)cfg('ga_id');
@@ -251,19 +258,25 @@ function breadcrumbs_html(array $items): string
     return '<div class="crumbs">' . implode(' &rsaquo; ', $parts) . '</div>';
 }
 
+/** Listing card. Set $c['featured'] = true (ACTIVE featured claim pinned by the route) to show the Featured badge. */
 function carrier_card(array $c, bool $showCity = true): string
 {
     $name = company_name($c['legal_name']);
-    $h = '<div class="listing-card"><a class="card-name" href="' . e(carrier_path($c)) . '">' . e($name) . '</a>';
+    $featured = !empty($c['featured']);
+    $h = '<div class="listing-card' . ($featured ? ' paid' : '') . '"><a class="card-name" href="' . e(carrier_path($c)) . '">' . e($name) . '</a>';
+    if ($featured) {
+        $h .= '<span class="badge badge-warn" style="align-self:flex-start">Featured</span>';
+    }
     if (!empty($c['dba_name'])) {
         $h .= '<div class="small">DBA ' . e(company_name($c['dba_name'])) . '</div>';
     }
     if ($showCity) {
-        $h .= '<div class="card-location">&#128205; ' . e(title_case($c['phy_city'])) . ', ' . e($c['phy_state']) . '</div>';
+        $loc = title_case($c['phy_city'] ?? null);
+        $h .= '<div class="card-location">&#128205; ' . e($loc !== '' ? $loc . ', ' . $c['phy_state'] : state_name($c['phy_state'] ?? null)) . '</div>';
     }
     $h .= '<div class="card-meta"><span>USDOT ' . (int)$c['dot'] . '</span>';
     if (!empty($c['mc_number'])) {
-        $h .= '<span>MC ' . e($c['mc_number']) . '</span>';
+        $h .= '<span>' . e(docket_label($c, ' ')) . '</span>';
     }
     if (!empty($c['power_units'])) {
         $h .= '<span>' . nf($c['power_units']) . ' power unit' . ((int)$c['power_units'] === 1 ? '' : 's') . '</span>';
@@ -285,35 +298,50 @@ function carrier_card(array $c, bool $showCity = true): string
     return $h;
 }
 
-/** Vendor/sponsor block: up to $max service categories relevant to carriers in $state. */
+/**
+ * Vendor/sponsor block. ACTIVE featured vendors (any category) that serve $state rotate through
+ * up to $max slots, the rotation offset moving with the carrier (dot) and the day of year so each
+ * featured vendor gets exposure. Only when no featured vendor serves the state do the static
+ * sponsors.php entries (or the "Get quotes" lead CTA) fill the slots.
+ */
 function sponsor_block(string $state, ?int $dot = null, array $types = ['factoring', 'insurance', 'dispatch'], int $max = 3): string
 {
     $sponsors = $GLOBALS['SPONSORS'];
+    $cats = $GLOBALS['CATEGORIES'];
     $h = '<div class="card"><h3>Services for carriers in ' . e(state_name($state)) . '</h3><div class="sponsor">';
+    $featured = featured_vendors_for_state($state);
+    if ($featured) {
+        $count = count($featured);
+        $offset = (int)((($dot ?? 0) + (int)date('z')) % $count);
+        for ($i = 0; $i < min($max, $count); $i++) {
+            $v = $featured[($offset + $i) % $count];
+            $label = $cats[$v['category']]['name'] ?? ucwords(str_replace('_', ' ', (string)$v['category']));
+            $h .= '<div class="slot paid"><span class="tag">' . e($label) . ' · sponsored</span>'
+                . '<b>' . e($v['name']) . '</b><p>' . e((string)$v['blurb']) . '</p>';
+            if (!empty($v['website'])) {
+                $h .= '<a class="btn btn-outline" rel="nofollow sponsored" href="' . e($v['website']) . '">Visit website</a>';
+            } elseif (!empty($v['phone'])) {
+                $h .= '<a class="btn btn-outline" href="tel:' . e(preg_replace('/\D/', '', $v['phone'])) . '">Call ' . e($v['phone']) . '</a>';
+            }
+            $h .= '</div>';
+        }
+        $h .= '</div><p class="small" style="margin-top:10px">Provider? <a href="/advertise">Put your company in front of ' . e(state_name($state)) . ' carriers &rarr;</a></p></div>';
+        return $h;
+    }
     $n = 0;
     foreach ($types as $type) {
         if ($n >= $max || !isset($sponsors[$type])) {
             continue;
         }
         $cfgS = $sponsors[$type];
-        $cat = QUOTE_TO_CATEGORY[$type] ?? null;
-        $paid = $cat ? vendors_for($cat, $state, 1) : [];
         $house = array_values(array_filter($cfgS['items'], fn($it) => $it['states'] === 'ALL' || in_array($state, (array)$it['states'], true)));
-        $h .= '<div class="slot' . ($paid ? ' paid' : '') . '"><span class="tag">' . e($cfgS['label']) . ($paid ? ' · sponsored' : '') . '</span>';
-        if ($paid) {
-            $v = $paid[0];
-            $h .= '<b>' . e($v['name']) . '</b><p>' . e((string)$v['blurb']) . '</p>';
-            if (!empty($v['website'])) {
-                $h .= '<a class="btn btn-outline" rel="nofollow sponsored" href="' . e($v['website']) . '">Visit website</a>';
-            } elseif (!empty($v['phone'])) {
-                $h .= '<a class="btn btn-outline" href="tel:' . e(preg_replace('/\D/', '', $v['phone'])) . '">Call ' . e($v['phone']) . '</a>';
-            }
-        } elseif ($house) {
+        $h .= '<div class="slot"><span class="tag">' . e($cfgS['label']) . '</span>';
+        if ($house) {
             $v = $house[0];
             $h .= '<b>' . e($v['name']) . '</b><p>' . e($v['blurb']) . '</p><a class="btn btn-outline" rel="sponsored" href="' . e($v['url']) . '">Learn more</a>';
         } else {
             $h .= '<b>' . e($cfgS['blurb']) . '</b><p>Compare offers from providers serving ' . e(state_name($state)) . ' carriers.</p>'
-                . '<a class="btn btn-outline" href="/quote/' . e($type) . '?state=' . e($state) . ($dot ? '&dot=' . $dot : '') . '">Get quotes</a>';
+                . '<a class="btn btn-outline" rel="nofollow" href="/quote/' . e($type) . '?state=' . e($state) . ($dot ? '&dot=' . $dot : '') . '">Get quotes</a>';
         }
         $h .= '</div>';
         $n++;
@@ -351,30 +379,47 @@ function claim_box(array $c, ?array $claim): string
         return '<div class="cta-box" style="border-color:rgba(46,204,113,0.5)"><h3>&#10004; Verified listing</h3>'
             . '<p>This profile was claimed and verified by ' . e(company_name($c['legal_name'])) . '.</p></div>';
     }
+    $prices = cfg('prices');
     return '<div class="cta-box"><h3>Is this your company?</h3>'
-        . '<p>Claim this page to add your website, logo and email, get a Verified badge, correct your details and remove competitor offers from your profile. From $' . (int)cfg('prices')['claim_verified'] . '/year.</p>'
-        . '<a class="btn" href="/claim/' . (int)$c['dot'] . '">Claim this listing &rarr;</a></div>';
+        . '<p>Claim this page to get a Verified badge, add your website link and an email button, and remove competitor offers from your profile ($' . (int)$prices['claim_verified'] . ' for one year). '
+        . 'Featured ($' . (int)$prices['claim_featured'] . ' for one year) adds top placement on your city and cargo pages.</p>'
+        . '<a class="btn" href="/claim/' . (int)$c['dot'] . '" rel="nofollow">Claim this listing &rarr;</a></div>';
 }
 
+/**
+ * Pager: first, prev, page-2..page+2, next, last, plus a jump link at every 10% of the range
+ * (at most 10 extra links) so any page of a long list is a few clicks from page 1.
+ */
 function pager_html(string $base, int $page, int $pages): string
 {
     if ($pages <= 1) {
         return '';
     }
+    $page = max(1, min($page, $pages));
+    $nums = [1, $pages];
+    for ($i = $page - 2; $i <= $page + 2; $i++) {
+        if ($i >= 1 && $i <= $pages) {
+            $nums[] = $i;
+        }
+    }
+    if ($pages > 10) {
+        for ($k = 1; $k <= 10; $k++) {
+            $nums[] = (int)round($pages * $k / 10);
+        }
+    }
+    $nums = array_values(array_unique(array_filter($nums, fn($n) => $n >= 1 && $n <= $pages)));
+    sort($nums);
     $h = '<div class="pager">';
     if ($page > 1) {
         $h .= '<a href="' . e(page_url($base, $page - 1)) . '" rel="prev">&laquo; Prev</a>';
     }
-    $start = max(1, $page - 3);
-    $end = min($pages, $page + 3);
-    if ($start > 1) {
-        $h .= '<a href="' . e(page_url($base, 1)) . '">1</a>' . ($start > 2 ? '<span>&hellip;</span>' : '');
-    }
-    for ($i = $start; $i <= $end; $i++) {
+    $last = 0;
+    foreach ($nums as $i) {
+        if ($last && $i > $last + 1) {
+            $h .= '<span>&hellip;</span>';
+        }
         $h .= $i === $page ? '<span class="cur">' . $i . '</span>' : '<a href="' . e(page_url($base, $i)) . '">' . $i . '</a>';
-    }
-    if ($end < $pages) {
-        $h .= ($end < $pages - 1 ? '<span>&hellip;</span>' : '') . '<a href="' . e(page_url($base, $pages)) . '">' . $pages . '</a>';
+        $last = $i;
     }
     if ($page < $pages) {
         $h .= '<a href="' . e(page_url($base, $page + 1)) . '" rel="next">Next &raquo;</a>';
@@ -395,11 +440,42 @@ function not_found(string $msg = 'Page not found'): void
 {
     http_response_code(404);
     page_start(['title' => 'Not found | ' . cfg('site_name'), 'robots' => 'noindex', 'cache' => false]);
-    echo '<div class="container section"><h1 style="color:#fff">404</h1><p>' . e($msg) . '</p><p><a href="/carriers/">Browse carriers by state</a> or <a href="/carriers/search">search</a>.</p></div>';
+    echo '<div class="container section"><h1 style="color:#fff">404</h1><p>' . e($msg) . '</p><p><a href="/carriers/">Browse carriers by state</a> or <a href="/carriers/search" rel="nofollow">search</a>.</p></div>';
     page_end();
     exit;
 }
 
+/** 503 page used when carriers.db is missing on a route that needs it. Real HTML, noindex, never cached. */
+function service_unavailable(string $detail = ''): void
+{
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    if ($detail !== '') {
+        error_log('TDUSA 503: ' . $detail);
+    }
+    if (!headers_sent()) {
+        http_response_code(503);
+        header('Retry-After: 300');
+        header('X-Robots-Tag: noindex');
+    }
+    try {
+        page_start(['title' => 'Temporarily unavailable | ' . cfg('site_name'), 'robots' => 'noindex', 'cache' => false]);
+        echo '<div class="container section"><div class="card" style="max-width:720px;margin:0 auto"><h1 style="color:#fff;font-size:1.5rem;margin-bottom:10px">Carrier data is temporarily unavailable</h1>'
+            . '<p>The carrier database is being updated. Please try again in a few minutes.</p>'
+            . '<p style="margin-top:12px"><a class="btn btn-outline" href="/">Home</a></p></div></div>';
+        page_end();
+    } catch (Throwable $e) {
+        if (!headers_sent()) {
+            header('Content-Type: text/html; charset=UTF-8');
+            header('Cache-Control: no-store');
+        }
+        echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="robots" content="noindex"><title>Temporarily unavailable</title></head><body><h1>Temporarily unavailable</h1><p>Please try again in a few minutes.</p></body></html>';
+    }
+    exit;
+}
+
+/** Hidden anti-spam fields for the public forms (hour-bucketed token plus honeypot). */
 function form_hidden(): string
 {
     return '<input type="hidden" name="_t" value="' . e(csrf_token()) . '"><div class="hp"><label>Leave this field empty<input type="text" name="website_url_hp" tabindex="-1" autocomplete="off"></label></div>';

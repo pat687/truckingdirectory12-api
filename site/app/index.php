@@ -25,6 +25,9 @@ $routes = [
     'packages'      => 'packages.php',      // /carrier-data/
     'vendor_index'  => 'vendor_index.php',  // /factoring_companies/
     'vendor_state'  => 'vendor_state.php',  // /factoring_companies/georgia.html
+    'opt_out'       => 'opt_out.php',       // /opt-out
+    'terms'         => 'terms.php',         // /terms
+    'privacy'       => 'privacy.php',       // /privacy
     'admin'         => 'admin.php',         // /admin
     'webhook'       => 'webhook.php',       // /stripe-webhook
 ];
@@ -33,4 +36,26 @@ $r = (string)($_GET['r'] ?? 'carriers');
 if (!isset($routes[$r])) {
     not_found();
 }
-require __DIR__ . '/routes/' . $routes[$r];
+
+// Canonical case: every public URL is lower-case. .htaccess matches case-insensitively ([NC]) so
+// /Carriers/Georgia/ reaches us; send it to /carriers/georgia/ once (GET/HEAD only, query kept).
+$reqPath = request_path();
+if ($reqPath !== strtolower($reqPath) && in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true)) {
+    // Keep the CLIENT's query string. $_SERVER['QUERY_STRING'] holds the rewritten one (r=state&state=...)
+    // under Apache/LiteSpeed; REQUEST_URI is the original request.
+    $qs = (string)(parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_QUERY) ?? '');
+    header('Location: ' . url(strtolower($reqPath) . ($qs !== '' ? '?' . $qs : '')), true, 301);
+    exit;
+}
+// Route parameters that come from the path are lower-case too (belt and braces for [NC] matches).
+foreach (['state', 'city', 'cargo', 'slug', 'cat', 'part'] as $k) {
+    if (isset($_GET[$k]) && is_string($_GET[$k])) {
+        $_GET[$k] = strtolower($_GET[$k]);
+    }
+}
+try {
+    require __DIR__ . '/routes/' . $routes[$r];
+} catch (CarriersDbMissing $e) {
+    // Only routes that actually touch carriers.db end up here; admin, webhook, forms and legal pages keep working.
+    service_unavailable($e->getMessage());
+}

@@ -1,0 +1,5 @@
+# Suppression list for build_carriers_db.py (removal requests).
+# One USDOT number per line; blank lines and anything after # are ignored.
+# Carriers listed here are left out of carriers.db entirely. After editing this file,
+# rebuild carriers.db and upload it (README section 6). Example:
+# 1234567   # removal request received 2026-10-16

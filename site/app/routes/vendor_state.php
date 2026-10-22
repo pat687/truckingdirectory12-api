@@ -12,13 +12,16 @@ $info = $cats[$cat];
 $stName = state_name($abbr);
 $st = q1('SELECT * FROM stats_state WHERE state = ?', [$abbr]);
 $vendors = vendors_for($cat, $abbr, 100);
-$cities = q('SELECT * FROM stats_city WHERE state = ? ORDER BY n DESC LIMIT 12', [$abbr]);
+$cities = q('SELECT * FROM stats_city WHERE state = ? AND n_active > 0 ORDER BY n_active DESC LIMIT 12', [$abbr]);
 $crumbs = [['Home', '/'], [$info['name'], '/' . $cat . '/'], [$stName, null]];
 $n = $st ? (int)$st['n'] : 0;
 page_start([
     'title' => $info['name'] . ' in ' . $stName . ' | ' . cfg('site_name'),
     'description' => $info['name'] . ' serving ' . $stName . ' trucking companies. ' . nf($n) . ' FMCSA-registered carriers are based in ' . $stName . '. ' . ($vendors ? count($vendors) . ' listed providers.' : 'Request quotes or get your company listed.'),
     'canonical' => vendor_state_path($cat, $abbr), 'jsonld' => [breadcrumbs_ld($crumbs)],
+    // A category x state page with no ACTIVE vendor is a placeholder: crawlable (200) but not indexed,
+    // and the sitemap leaves it out. It flips to index,follow the day a vendor goes live.
+    'robots' => $vendors ? 'index,follow' : 'noindex,follow',
 ]);
 ?>
 <div class="hero"><div class="container"><?= breadcrumbs_html($crumbs) ?>
@@ -34,9 +37,9 @@ page_start([
 <div class="card"><h2>No <?= e(strtolower($info['name'])) ?> listed in <?= e($stName) ?> yet</h2><p>We only list real, verified providers. Be the first <?= e($info['singular']) ?> on this page and on every <?= e($stName) ?> carrier profile.</p><p style="margin-top:12px"><a class="btn" href="/get-listed?cat=<?= e($cat) ?>&state=<?= e($abbr) ?>">Get listed in <?= e($stName) ?> &rarr;</a></p></div>
 <?php endif; ?>
 <?php if ($info['quote']): ?>
-<div class="cta-box"><h3>Carriers: get <?= e(strtolower($info['name'])) ?> quotes</h3><p>Tell us about your operation and matched providers serving <?= e($stName) ?> will contact you. Free.</p><a class="btn" href="/quote/<?= e($info['quote']) ?>?state=<?= e($abbr) ?>">Request quotes &rarr;</a></div>
+<div class="cta-box"><h3>Carriers: get <?= e(strtolower($info['name'])) ?> quotes</h3><p>Tell us about your operation and matched providers serving <?= e($stName) ?> will contact you. Free.</p><a class="btn" rel="nofollow" href="/quote/<?= e($info['quote']) ?>?state=<?= e($abbr) ?>">Request quotes &rarr;</a></div>
 <?php endif; ?>
-<div class="card"><h2>Trucking companies in <?= e($stName) ?></h2><p class="small" style="margin-bottom:10px">The carriers these providers serve. Largest cities:</p><div class="chips"><?php foreach ($cities as $c): ?><a href="<?= e(city_path($abbr, $c['city_slug'])) ?>"><?= e(title_case($c['city'])) ?><small><?= nf($c['n']) ?></small></a><?php endforeach; ?><a href="<?= e(state_path($abbr)) ?>">All <?= e($stName) ?> carriers &rarr;</a></div></div>
+<div class="card"><h2>Trucking companies in <?= e($stName) ?></h2><p class="small" style="margin-bottom:10px">The carriers these providers serve. Largest cities:</p><div class="chips"><?php foreach ($cities as $c): ?><a href="<?= e(city_path($abbr, $c['city_slug'])) ?>"><?= e(title_case($c['city'])) ?><small><?= nf($c['n_active']) ?></small></a><?php endforeach; ?><a href="<?= e(state_path($abbr)) ?>">All <?= e($stName) ?> carriers &rarr;</a></div></div>
 <div class="card"><h2><?= e($info['name']) ?> in other states</h2><div class="chips"><?php foreach (US_STATES as $a => [$nm, $s]): if ($a !== $abbr): ?><a href="<?= e(vendor_state_path($cat, $a)) ?>"><?= e($nm) ?></a><?php endif; endforeach; ?></div></div>
 </div>
 <aside>

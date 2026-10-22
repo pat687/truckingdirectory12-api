@@ -26,7 +26,7 @@ page_start([
 <tr><td><b style="color:#fff"><?= e($p['name']) ?></b></td><td><?= e($p['who']) ?></td><td><?= e($p['fields']) ?></td><td style="color:var(--gold);font-weight:800;white-space:nowrap">$<?= (int)$p['price'] ?></td><td><a class="btn" rel="nofollow" href="<?= e($p['url']) ?>">Get it &rarr;</a></td></tr>
 <?php endforeach; ?>
 </tbody></table>
-<p class="small" style="margin-top:10px">Instant CSV/Excel download after checkout. Need a custom cut (a radius, a cargo mix, a fleet-size band)? Email <a href="mailto:<?= e((string)cfg('notify_email')) ?>"><?= e((string)cfg('notify_email')) ?></a>.</p></div>
+<p class="small" style="margin-top:10px">Instant CSV/Excel download after checkout. Need a custom cut (a radius, a cargo mix, a fleet-size band)? Email <a href="mailto:<?= e((string)cfg('contact_email')) ?>"><?= e((string)cfg('contact_email')) ?></a>.</p></div>
 
 <div class="grid2">
 <div class="card"><h2>Every field, explained</h2>

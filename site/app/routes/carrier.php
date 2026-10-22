@@ -2,13 +2,14 @@
 /** Carrier profile: /carrier/{dot}/{slug} */
 declare(strict_types=1);
 
-$dot = (int)($_GET['dot'] ?? 0);
+$dotStr = (string)($_GET['dot'] ?? '');
+$dot = (int)$dotStr;
 $c = $dot > 0 ? q1('SELECT * FROM carriers WHERE dot = ?', [$dot]) : null;
 if (!$c) {
     not_found('No carrier with USDOT ' . $dot . ' in our records.');
 }
-// Canonical URL always carries the name slug
-if (($_GET['slug'] ?? '') !== $c['slug']) {
+// One canonical URL per carrier: the USDOT digits without leading zeros plus the current name slug.
+if ($dotStr !== (string)$dot || (string)($_GET['slug'] ?? '') !== $c['slug']) {
     header('Location: ' . url(carrier_path($c)), true, 301);
     exit;
 }
@@ -19,6 +20,11 @@ $dba = $c['dba_name'] ? company_name($c['dba_name']) : '';
 $city = title_case($c['phy_city']);
 $st = (string)$c['phy_state'];
 $stName = state_name($st);
+$hasCity = $city !== '' && !empty($c['city_slug']);   // some census rows have no city
+$where = $hasCity ? $city . ', ' . $stName : $stName;
+$whereShort = $hasCity ? $city . ', ' . $st : $stName;
+$docket = docket_label($c);        // "MC-123456", "MX-123456", "FF-123456" or ''
+$docketKind = docket_prefix($c);   // MC / MX / FF
 $pu = $c['power_units'] !== null ? (int)$c['power_units'] : null;
 $drv = $c['drivers'] !== null ? (int)$c['drivers'] : null;
 $cargo = cargo_list($c['cargo']);
@@ -28,6 +34,11 @@ $status = $c['status'];
 $inactive = $status === 'INACTIVE' || !empty($c['oos_date']);
 $snapshot = meta('snapshot_date');
 $stats = q1('SELECT * FROM stats_state WHERE state = ?', [$st]);
+// Index gate: tier 3 (inactive) is never indexed; tier 2 only once the owner raises sitemap_max_tier to 2,
+// so the robots rule and the sitemaps always agree.
+$tier = (int)$c['index_tier'];
+$maxTier = max(1, min(2, (int)cfg('sitemap_max_tier', 1)));
+$indexable = $tier < 3 && $tier <= $maxTier;
 
 // ---- generated description (unique per record, built only from the data on file)
 $cargoNames = array_map(fn($t) => $t['name'], $cargo);
@@ -39,8 +50,8 @@ if ($cargoNames) {
 }
 $opText = $ops ? strtolower(implode(' / ', $ops)) : '';
 $s1 = $name . ' is a' . (preg_match('/^[aeiou]/i', $opText) ? 'n ' : ' ') . ($opText ? $opText . ' ' : '')
-    . 'motor carrier based in ' . $city . ', ' . $stName
-    . ' (USDOT ' . $dot . ($c['mc_number'] ? ', MC ' . $c['mc_number'] : '') . ').';
+    . 'motor carrier based in ' . $where
+    . ' (USDOT ' . $dot . ($docket ? ', ' . $docket : '') . ').';
 if ($pu !== null && $pu > 0) {
     $drvText = $drv !== null && $drv > 0 ? ' and ' . nf($drv) . ' driver' . ($drv === 1 ? '' : 's') : '';
     $s2 = $pu === 1
@@ -55,25 +66,37 @@ $s5 = $c['mcs150_date'] ? ' Its most recent MCS-150 (biennial update) was filed 
 $s6 = $status ? ' USDOT status: ' . ucfirst(strtolower($status)) . ($snapshot ? ' as of the FMCSA snapshot dated ' . fmt_date($snapshot) : '') . '.' : '';
 $description = $s1 . $s2 . $s3 . $s4 . $s5 . $s6;
 
-$metaDesc = $name . ' - USDOT ' . $dot . ($c['mc_number'] ? ', MC ' . $c['mc_number'] : '') . ' - ' . $city . ', ' . $st . '. '
-    . ($pu ? nf($pu) . ' power units' . ($drv !== null ? ', ' . nf($drv) . ' drivers' : '') . '. ' : '')
+$metaDesc = $name . ' - USDOT ' . $dot . ($docket ? ', ' . $docket : '') . ' - ' . $whereShort . '. '
+    . ($pu ? nf($pu) . ' power unit' . ($pu === 1 ? '' : 's') . ($drv !== null && $drv > 0 ? ', ' . nf($drv) . ' driver' . ($drv === 1 ? '' : 's') : '') . '. ' : '')
     . ($cargoNames ? 'Hauls ' . implode(', ', array_slice($cargoNames, 0, 3)) . '. ' : '')
     . 'Phone, address, authority, safety rating and fleet details.';
-$title = $name . ' | USDOT ' . $dot . ' | ' . $city . ', ' . $st . ' Trucking Company';
+// Site name is appended only while the title stays within 60 characters.
+$title = seo_title($name . ' | USDOT ' . $dot . ' | ' . $whereShort . ' Trucking Company', '', '', true);
 
-$crumbs = [['Carriers', '/carriers/'], [$stName, state_path($st)], [$city, city_path($st, (string)$c['city_slug'])], [$name, null]];
+$crumbs = [['Carriers', '/carriers/'], [$stName, state_path($st)]];
+if ($hasCity) {
+    $crumbs[] = [$city, city_path($st, (string)$c['city_slug'])];
+}
+$crumbs[] = [$name, null];
+
+$address = ['@type' => 'PostalAddress'];
+foreach (['streetAddress' => title_case($c['phy_street']), 'addressLocality' => $city, 'addressRegion' => $st, 'postalCode' => trim((string)$c['phy_zip'])] as $k => $val) {
+    if ($val !== '') {   // never emit empty strings in structured data
+        $address[$k] = $val;
+    }
+}
+$address['addressCountry'] = 'US';
 $org = [
     '@context' => 'https://schema.org', '@type' => 'Organization', 'name' => $name,
     'identifier' => [['@type' => 'PropertyValue', 'propertyID' => 'USDOT', 'value' => (string)$dot]],
-    'address' => ['@type' => 'PostalAddress', 'streetAddress' => title_case($c['phy_street']), 'addressLocality' => $city,
-                  'addressRegion' => $st, 'postalCode' => (string)$c['phy_zip'], 'addressCountry' => 'US'],
+    'address' => $address,
     'url' => url(carrier_path($c)), 'sameAs' => [safer_url($dot)],
 ];
 if ($dba) {
     $org['alternateName'] = $dba;
 }
 if ($c['mc_number']) {
-    $org['identifier'][] = ['@type' => 'PropertyValue', 'propertyID' => 'MC', 'value' => (string)$c['mc_number']];
+    $org['identifier'][] = ['@type' => 'PropertyValue', 'propertyID' => $docketKind, 'value' => (string)$c['mc_number']];
 }
 if ($c['phone']) {
     $org['telephone'] = '+1' . $c['phone'];
@@ -85,7 +108,7 @@ if ($claim && !empty($claim['website'])) {
 
 page_start([
     'title' => $title, 'description' => $metaDesc, 'canonical' => carrier_path($c),
-    'robots' => (int)$c['index_tier'] >= 3 ? 'noindex,follow' : 'index,follow',
+    'robots' => $indexable ? 'index,follow' : 'noindex,follow',
     'jsonld' => [$org, breadcrumbs_ld($crumbs)],
 ]);
 ?>
@@ -93,7 +116,7 @@ page_start([
 <?= breadcrumbs_html($crumbs) ?>
 <h1><?= e($name) ?><?= $claim ? ' <span class="badge badge-ok" style="vertical-align:middle;font-size:0.8rem">&#10004; Verified</span>' : '' ?></h1>
 <?php if ($dba): ?><p class="sub">Doing business as <b><?= e($dba) ?></b></p><?php endif; ?>
-<p class="sub">USDOT <?= $dot ?><?= $c['mc_number'] ? ' &middot; MC ' . e($c['mc_number']) : '' ?> &middot; <?= e($city) ?>, <?= e($stName) ?> &middot; <?= e(operation_label($c['carrier_operation'])) ?></p>
+<p class="sub">USDOT <?= $dot ?><?= $docket ? ' &middot; ' . e($docket) : '' ?> &middot; <?= e($where) ?> &middot; <?= e(operation_label($c['carrier_operation'])) ?></p>
 <p style="margin-top:12px">
 <?php if ($status): ?><span class="badge <?= $inactive ? 'badge-bad' : 'badge-ok' ?>"><?= e(ucfirst(strtolower($status))) ?></span><?php endif; ?>
 <?php if (!empty($c['oos_date'])): ?><span class="badge badge-bad">Out of service <?= e(fmt_date($c['oos_date'])) ?></span><?php endif; ?>
@@ -107,9 +130,15 @@ page_start([
 <div class="container section"><div class="grid2">
 <div>
   <div class="card prose"><p><?= e($description) ?></p>
-  <?php if ($c['phone']): ?><p><a class="btn" href="tel:+1<?= e($c['phone']) ?>">&#128222; Call <?= e(fmt_phone($c['phone'])) ?></a>
-  <?php if ($claim && !empty($claim['website'])): ?> <a class="btn btn-outline" rel="nofollow" href="<?= e($claim['website']) ?>">Visit website</a><?php endif; ?>
-  <?php if ($claim && (int)$claim['public_email'] === 1 && !empty($claim['email'])): ?> <a class="btn btn-outline" href="mailto:<?= e($claim['email']) ?>">Email</a><?php endif; ?></p><?php endif; ?>
+  <?php
+  // The claimant's website and email buttons are what a Verified listing pays for, so they render
+  // whether or not FMCSA has an office phone on file for the carrier.
+  $hasSite = $claim && !empty($claim['website']);
+  $hasMail = $claim && (int)$claim['public_email'] === 1 && !empty($claim['email']);
+  if ($c['phone'] || $hasSite || $hasMail): ?><p>
+  <?php if ($c['phone']): ?><a class="btn" href="tel:+1<?= e($c['phone']) ?>">&#128222; Call <?= e(fmt_phone($c['phone'])) ?></a><?php endif; ?>
+  <?php if ($hasSite): ?> <a class="btn btn-outline" rel="nofollow" href="<?= e($claim['website']) ?>">Visit website</a><?php endif; ?>
+  <?php if ($hasMail): ?> <a class="btn btn-outline" href="mailto:<?= e($claim['email']) ?>">Email</a><?php endif; ?></p><?php endif; ?>
   </div>
 
   <div class="card"><h2>Company details</h2>
@@ -117,8 +146,8 @@ page_start([
     <tr><th>Legal name</th><td><?= e($name) ?></td></tr>
     <?php if ($dba): ?><tr><th>DBA name</th><td><?= e($dba) ?></td></tr><?php endif; ?>
     <tr><th>USDOT number</th><td><?= $dot ?></td></tr>
-    <?php if ($c['mc_number']): ?><tr><th>MC / docket number</th><td>MC-<?= e($c['mc_number']) ?></td></tr><?php endif; ?>
-    <tr><th>Physical address</th><td><?= e(title_case($c['phy_street'])) ?><br><?= e($city) ?>, <?= e($st) ?> <?= e($c['phy_zip']) ?></td></tr>
+    <?php if ($docket): ?><tr><th><?= e($docketKind) ?> number</th><td><?= e($docket) ?></td></tr><?php endif; ?>
+    <tr><th>Physical address</th><td><?= e(title_case($c['phy_street'])) ?><br><?= $hasCity ? e($city) . ', ' : '' ?><?= e($st) ?> <?= e($c['phy_zip']) ?></td></tr>
     <tr><th>Phone</th><td><?= $c['phone'] ? '<a href="tel:+1' . e($c['phone']) . '">' . e(fmt_phone($c['phone'])) . '</a>' : 'Not on file' ?></td></tr>
     <?php if ($status): ?><tr><th>USDOT status</th><td><?= e(ucfirst(strtolower($status))) ?><?= $snapshot ? ' <span class="small">(as of ' . e(fmt_date($snapshot)) . ')</span>' : '' ?></td></tr><?php endif; ?>
     <tr><th>Carrier operation</th><td><?= e(operation_label($c['carrier_operation'])) ?></td></tr>
@@ -143,11 +172,12 @@ page_start([
     <?php endif; ?>
   </table>
   <p class="small" style="margin-top:12px">Source: FMCSA motor carrier census<?= $snapshot ? ', snapshot ' . e(fmt_date($snapshot)) : '' ?>. Operating status and insurance can change daily; confirm on <a href="<?= e(safer_url($dot)) ?>" rel="nofollow noopener" target="_blank">FMCSA SAFER</a> before tendering freight.</p>
+  <p class="small" style="margin-top:6px">Data from public FMCSA registration records<?= $snapshot ? ' as of ' . e(fmt_date($snapshot)) : '' ?>. Not affiliated with FMCSA or USDOT. Carriers can <a href="/claim/<?= $dot ?>" rel="nofollow">claim</a> or <a href="/opt-out" rel="nofollow">request removal</a> of this profile.</p>
   </div>
 
   <?php
-  // Nearby carriers in the same city (internal links)
-  $nearby = q('SELECT dot, legal_name, slug, phy_city, phy_state, power_units, drivers, cargo, phone, mc_number, dba_name FROM carriers WHERE phy_state = ? AND city_slug = ? AND dot <> ? ORDER BY power_units DESC, legal_name LIMIT 6', [$st, $c['city_slug'], $dot]);
+  // Nearby active carriers in the same city (internal links); skipped when the record has no city.
+  $nearby = $hasCity ? q('SELECT dot, legal_name, slug, phy_city, phy_state, power_units, drivers, cargo, phone, mc_number, mc_prefix, dba_name FROM carriers WHERE phy_state = ? AND city_slug = ? AND dot <> ? AND index_tier <= 2 ORDER BY power_units DESC, legal_name LIMIT 6', [$st, $c['city_slug'], $dot]) : [];
   if ($nearby): ?>
   <div class="card"><h2>Other trucking companies in <?= e($city) ?>, <?= e($st) ?></h2>
   <div class="listings-grid"><?php foreach ($nearby as $n) echo carrier_card($n, false); ?></div>
@@ -155,28 +185,21 @@ page_start([
   <?php endif; ?>
 
   <?php if ($cargo): $first = $cargo[0];
-  $similar = q('SELECT c.dot, c.legal_name, c.slug, c.phy_city, c.phy_state, c.power_units, c.drivers, c.cargo, c.phone, c.mc_number, c.dba_name FROM carrier_cargo cc JOIN carriers c ON c.dot = cc.dot WHERE cc.cargo_id = ? AND cc.state = ? AND cc.dot <> ? ORDER BY cc.power_units DESC LIMIT 6', [(int)$first['id'], $st, $dot]);
+  $similar = q('SELECT c.dot, c.legal_name, c.slug, c.phy_city, c.phy_state, c.power_units, c.drivers, c.cargo, c.phone, c.mc_number, c.mc_prefix, c.dba_name FROM carrier_cargo cc JOIN carriers c ON c.dot = cc.dot WHERE cc.cargo_id = ? AND cc.state = ? AND cc.dot <> ? AND c.index_tier <= 2 ORDER BY cc.power_units DESC LIMIT 6', [(int)$first['id'], $st, $dot]);
   if ($similar): ?>
   <div class="card"><h2><?= e($first['name']) ?> carriers in <?= e($stName) ?></h2>
   <div class="listings-grid"><?php foreach ($similar as $n) echo carrier_card($n); ?></div>
   <p style="margin-top:12px"><a href="<?= e(cargo_path($st, $first['slug'])) ?>">All <?= e($first['name']) ?> carriers in <?= e($stName) ?> &rarr;</a></p></div>
   <?php endif; endif; ?>
-
-  <div class="card prose"><h2>Frequently asked questions</h2>
-    <p><b>What is <?= e($name) ?>'s USDOT number?</b><br>USDOT <?= $dot ?><?= $c['mc_number'] ? ' and MC-' . e($c['mc_number']) : '' ?>, registered to <?= e($city) ?>, <?= e($stName) ?>.</p>
-    <p><b>How many trucks does <?= e($name) ?> operate?</b><br><?= $pu ? nf($pu) . ' power unit' . ($pu === 1 ? '' : 's') . ($drv ? ' with ' . nf($drv) . ' driver' . ($drv === 1 ? '' : 's') : '') : 'Fleet size was not reported on its last MCS-150 filing' ?>.</p>
-    <p><b>Is <?= e($name) ?> an interstate or intrastate carrier?</b><br><?= e(operation_label($c['carrier_operation'])) ?><?= $ops ? ', classified as ' . e(implode(' and ', $ops)) : '' ?>.</p>
-    <?php if ($cargoText): ?><p><b>What does <?= e($name) ?> haul?</b><br><?= e($cargoText) ?>.</p><?php endif; ?>
-  </div>
 </div>
 
 <aside>
   <?= claim_box($c, $claim) ?>
-  <?php if (!$claim || $claim['plan'] !== 'featured') echo sponsor_block($st, $dot); ?>
+  <?php if (!$claim) echo sponsor_block($st, $dot); // any ACTIVE claim removes competitor offers (promised in the Verified plan) ?>
   <?= data_cta($st, $stats) ?>
   <div class="card"><h3>Browse</h3><div class="chips">
     <a href="<?= e(state_path($st)) ?>"><?= e($stName) ?> carriers</a>
-    <a href="<?= e(city_path($st, (string)$c['city_slug'])) ?>"><?= e($city) ?> carriers</a>
+    <?php if ($hasCity): ?><a href="<?= e(city_path($st, (string)$c['city_slug'])) ?>"><?= e($city) ?> carriers</a><?php endif; ?>
     <?php foreach ($cargo as $t): ?><a href="<?= e(cargo_path($st, $t['slug'])) ?>"><?= e($t['name']) ?></a><?php endforeach; ?>
   </div></div>
 </aside>
