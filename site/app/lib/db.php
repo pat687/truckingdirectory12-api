@@ -136,7 +136,7 @@ function sitedb(): PDO
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_vendors_cat ON vendors(category, status)');
         $pdo->exec("CREATE TABLE IF NOT EXISTS leads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            type TEXT NOT NULL,                -- factoring | insurance | dispatch | ... | suppression | stripe-unmatched
+            type TEXT NOT NULL,                -- factoring | insurance | dispatch | ... | suppression | stripe-unmatched | stripe-duplicate
             dot INTEGER, company TEXT, contact_name TEXT, email TEXT, phone TEXT, state TEXT,
             trucks INTEGER, notes TEXT, source_url TEXT,
             status TEXT NOT NULL DEFAULT 'new', -- new | sold | contacted | closed

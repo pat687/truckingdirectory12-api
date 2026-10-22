@@ -46,7 +46,7 @@ if (preg_match('#(^|/)(\.ht|error_log$|php_errorlog$)#', $lc)) {
     return $deny(403);
 }
 if (!preg_match('#(^|/)(robots|ads|app-ads|llms|security|humans)\.txt$#', $lc) && preg_match('#\.(db|db-wal|db-shm|sqlite|log|bak|sql|py|md|txt|key)$#', $lc)
-    || preg_match('#(^|/)public_html-upload\.zip$#', $lc)) {
+    || preg_match('#(^|/)public_html-upload[^/]*\.zip$#', $lc)) {
     return $deny(403);
 }
 if (preg_match('#(^|/)(config|config\.local|categories|sponsors)\.php$#', $lc)) {

@@ -14,7 +14,12 @@ $chunk = max(1000, (int)cfg('sitemap_chunk', 50000));
 $maxTier = max(1, min(2, (int)cfg('sitemap_max_tier', 1)));
 $minCity = max(1, (int)cfg('min_city_carriers', 3));
 $snapshot = meta('snapshot_date') ?: date('Y-m-d');
-$maxSeq = (int)meta('max_seq', '0');
+$maxSeq = meta('max_seq');
+if ($maxSeq === null) {
+    // carriers.db missing or unreadable (meta() swallowed the error): answer 503 so crawlers retry, not 404
+    throw new CarriersDbMissing('carriers.db is missing or unreadable');
+}
+$maxSeq = (int)$maxSeq;
 $chunks = (int)ceil($maxSeq / $chunk);
 $part = strtolower((string)($_GET['part'] ?? ''));
 

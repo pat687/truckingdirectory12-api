@@ -84,18 +84,32 @@ function wh_plan_label(string $table, string $plan): string
     return $plan === 'featured' ? 'Featured vendor sponsorship (1 year)' : 'Standard vendor listing (1 year)';
 }
 
-/** Log a payment we cannot match, once per Stripe session (the session id is kept in leads.source_url). Returns true when newly logged. */
-function wh_unmatched(PDO $db, string $session, string $ref, int $amount, string $email, string $why, string $extra = ''): bool
+/**
+ * Record a payment that needs the owner's attention as a lead of $type, once per Stripe session (the session id
+ * is kept in leads.source_url), so it shows in /admin -> Leads. Returns true when newly logged.
+ */
+function wh_log_once(PDO $db, string $type, string $session, string $email, string $notes): bool
 {
-    $st = $db->prepare("SELECT id FROM leads WHERE type = 'stripe-unmatched' AND source_url = ?");
-    $st->execute([$session]);
-    if ($st->fetch()) {
+    $st = $db->prepare('SELECT id FROM leads WHERE type = ? AND source_url = ?');
+    $st->execute([$type, $session]);
+    $seen = (bool)$st->fetch();
+    $st->closeCursor();
+    if ($seen) {
         return false;
     }
-    $db->prepare("INSERT INTO leads (type, email, notes, source_url, status, ip, created_at) VALUES ('stripe-unmatched', ?, ?, ?, 'new', '', datetime('now'))")
-        ->execute([$email, 'Stripe session ' . $session . ' amount ' . wh_money($amount) . ($ref !== '' ? " reference '$ref'" : '') . ' - ' . $why, $session]);
+    $db->prepare("INSERT INTO leads (type, email, notes, source_url, status, ip, created_at) VALUES (?, ?, ?, ?, 'new', '', datetime('now'))")
+        ->execute([$type, $email, $notes, $session]);
+    return true;
+}
+
+/** Log a payment we cannot match, once per Stripe session. Returns true when newly logged. */
+function wh_unmatched(PDO $db, string $session, string $ref, int $amount, string $email, string $why, string $extra = ''): bool
+{
+    if (!wh_log_once($db, 'stripe-unmatched', $session, $email, 'Stripe session ' . $session . ' amount ' . wh_money($amount) . ($ref !== '' ? " reference '$ref'" : '') . ' - ' . $why)) {
+        return false;
+    }
     send_notification('Unmatched Stripe payment ' . wh_money($amount),
-        "Session $session from $email for " . wh_money($amount) . ($ref !== '' ? " carried reference '$ref'" : ' had no client_reference_id') . " ($why).\nMatch it manually in " . url('/admin') . " or refund it in Stripe." . $extra);
+        "Session $session from $email for " . wh_money($amount) . ($ref !== '' ? " carried reference '$ref' ($why)" : ' had no client_reference_id (paid through a link without the intake form)') . ".\nMatch it manually in " . url('/admin') . " or refund it in Stripe." . $extra);
     return true;
 }
 
@@ -189,10 +203,19 @@ function wh_checkout(PDO $db, array $s): void
         // A second payment for the same order, or a payment arriving after the owner already set the row by hand.
         error_log("TDUSA webhook: $ref is '{$row['status']}', not pending; session $session (" . wh_money($amount) . ') not applied');
         $prior = (string)($row['stripe_session'] ?? '');
-        send_notification(ucfirst($target['kind']) . " #$id payment for an order that is already '{$row['status']}' (" . wh_money($amount) . ')',
-            "Stripe session $session paid " . wh_money($amount) . " for $ref, but that order is already '{$row['status']}'.\nPayer: $email\nNothing was changed. "
-            . ($prior !== '' ? "It was already paid through session $prior, so this is a second payment: refund one of them in Stripe." : 'Its status was set by hand in /admin, so this may be the same payment arriving late: check Stripe, and refund it if the buyer paid twice.')
-            . $subNote);
+        $status = (string)$row['status'];
+        if (in_array($status, ['rejected', 'disputed'], true)) {
+            $advice = "That order is not live ($status), so refund this payment in Stripe, or set the row back by hand in /admin if the buyer should be listed again.";
+        } elseif ($prior !== '') {
+            $advice = "It was already paid through session $prior, so this is a second payment: refund one of them in Stripe.";
+        } else {
+            $advice = 'Its status was set by hand in /admin, so this may be the same payment arriving late: check Stripe, and refund it if the buyer paid twice.';
+        }
+        // Once per session (Stripe redelivers until it gets a 200): the lead keeps it visible in /admin -> Leads.
+        if (wh_log_once($db, 'stripe-duplicate', $session, $email, 'Stripe session ' . $session . ' amount ' . wh_money($amount) . " for $ref, which was already '$status'. " . $advice)) {
+            send_notification(ucfirst($target['kind']) . " #$id payment for an order that is already '$status' (" . wh_money($amount) . ')',
+                "Stripe session $session paid " . wh_money($amount) . " for $ref, but that order is already '$status'.\nPayer: $email\nNothing was changed. $advice\nIt is also listed in " . url('/admin?tab=leads') . ' as a stripe-duplicate lead.' . $subNote);
+        }
         echo 'no pending row';
         return;
     }
@@ -204,7 +227,8 @@ function wh_checkout(PDO $db, array $s): void
             echo 'no pending row';
             return;
         }
-        send_notification(ucfirst($target['kind']) . " #$id AMOUNT MISMATCH (" . wh_money($amount) . ' paid, ' . wh_money($expected) . ' expected)',
+        $paid = $currency === 'usd' ? wh_money($amount) : number_format($amount / 100, 2) . ' ' . strtoupper($currency);
+        send_notification(ucfirst($target['kind']) . " #$id AMOUNT MISMATCH ($paid paid, " . wh_money($expected) . ' USD expected)',
             "Stripe session $session paid " . wh_money($amount) . ' ' . strtoupper($currency) . " but the '{$row['plan']}' plan costs " . wh_money($expected) . ".\nPayer: $email\nThe row was set to 'review' and is NOT live. Check it in " . url('/admin') . ' before activating, or refund in Stripe.' . $subNote);
         echo 'amount mismatch';
         return;

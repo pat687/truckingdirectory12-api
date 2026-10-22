@@ -7,8 +7,8 @@ require __DIR__ . '/../lib/vendor_form.php';
 $total = (int)meta('total', '0');
 try {
     $top = q('SELECT state, state_name, n, n_fleet_1, n_fleet_21_100, n_fleet_100 FROM stats_state ORDER BY n DESC LIMIT 8');
-} catch (CarriersDbMissing $e) {
-    $top = []; // the sponsor form still works without carriers.db
+} catch (CarriersDbMissing | PDOException $e) {
+    $top = []; // the sponsor form still works without (or with a damaged) carriers.db
 }
 $support = (string)cfg('contact_email');
 page_start(['title' => 'Advertise to ' . nf($total) . ' Trucking Companies | ' . cfg('site_name'), 'description' => 'Sponsored placement on carrier profiles, state pages and category pages for the states you serve.', 'canonical' => '/advertise', 'cache' => false]);

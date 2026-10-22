@@ -104,10 +104,11 @@ RedirectMatch 404 ^/app/(config|config\.local|categories|sponsors)\.php$
 <FilesMatch "^(ads|app-ads|llms|security|humans)\.txt$">
   Require all granted
 </FilesMatch>
-# The upload package, in case it is left in public_html after extracting (it holds config.local.php).
-<Files "public_html-upload.zip">
+# The upload package (any copy, e.g. "public_html-upload (1).zip"), in case it is left in public_html after
+# extracting: it holds config.local.php.
+<FilesMatch "^public_html-upload.*\.zip$">
   Require all denied
-</Files>
+</FilesMatch>
 
 # Security headers
 <IfModule mod_headers.c>

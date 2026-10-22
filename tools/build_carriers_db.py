@@ -857,7 +857,7 @@ def main():
     out.close()
     size_mb = os.path.getsize(args.out) / 1e6
     print(f"Done: {args.out}  {total:,} carriers, {size_mb:,.0f} MB, snapshot {snapshot}, {time.time() - t0:,.0f}s")
-    print("Next: upload it to the server as data/carriers.db (see README.md).")
+    print("Next: upload it to the server as data/carriers.new.db, then rename it to carriers.db there (README section 6).")
 
 
 if __name__ == "__main__":

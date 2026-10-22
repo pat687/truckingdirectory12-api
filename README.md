@@ -86,16 +86,18 @@ RAM), `pc_flag` is derived from `CRGO_PASSENGERS` or `BUS_UNITS > 0` when the ma
    folder, put it in `public_html/app/data/` instead (that folder is web-blocked).
 3. **App files** — upload the whole `site/app/` folder to `public_html/app/`.
 4. **.htaccess** — upload `site/.htaccess` to `public_html/.htaccess`. If one already
-   exists, paste these rules at the top of it.
+   exists, keep a copy and merge its custom rules (redirects, ErrorDocument, caching) into the new file
+   rather than pasting the new rules over it: the new file must stay in one piece, guards first.
 5. **Permissions** — `public_html/app/storage/` must be writable by PHP (755 is enough on
    Hostinger; it creates `site.db` there on first use).
 6. **Secrets** — the engine writes `public_html/app/storage/form.key` (random, 0600) on first use
    to sign the public form tokens. Keep that folder writable; or set `form_secret` in
    `config.local.php` instead. The webhook, admin and legal pages work before `carriers.db`
-   is uploaded; carrier pages show a 503 "temporarily unavailable" page (noindex, never cached)
-   until it is.
+   is uploaded; carrier pages, /carrier-data/ and the 16 vendor category pages show a 503 "temporarily
+   unavailable" page (noindex, never cached) until it is, so upload `carriers.db` before the app.
 7. **.htaccess also hardens the whole site**: it forces HTTPS and the apex host (www → apex),
-   blocks `/app/`, `*.log|bak|sql|py|md|txt|key` and `error_log` files (robots.txt stays allowed),
+   blocks `/app/`, `*.log|bak|sql|py|md|txt|key` and `error_log` files (robots.txt, ads.txt, app-ads.txt,
+   llms.txt, security.txt and humans.txt stay allowed) and any `public_html-upload*.zip` left behind,
    adds HSTS and a Content-Security-Policy. The CSP allows inline scripts/styles, Google Tag Manager /
    Analytics and Google Fonts. If a static page (index.html, blog) loads a script, font or style from
    another host, add that host to the `Content-Security-Policy` line or the browser blocks it. Check the
